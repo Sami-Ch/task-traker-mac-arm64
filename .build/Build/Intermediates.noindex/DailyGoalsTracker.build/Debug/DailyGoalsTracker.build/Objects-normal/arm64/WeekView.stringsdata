@@ -1,0 +1,24 @@
+{
+  "source": "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/Views/WeekView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "No active goals",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 63
+        }
+      },
+      {
+        "comment": "",
+        "key": "–",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 167
+        }
+      }
+    ]
+  },
+  "version": 1
+}

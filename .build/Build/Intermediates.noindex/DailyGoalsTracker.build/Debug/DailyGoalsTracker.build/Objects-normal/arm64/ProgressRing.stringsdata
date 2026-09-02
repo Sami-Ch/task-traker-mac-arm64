@@ -1,0 +1,24 @@
+{
+  "source": "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/Views/ProgressRing.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 54
+        }
+      },
+      {
+        "comment": "",
+        "key": "%",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 57
+        }
+      }
+    ]
+  },
+  "version": 1
+}

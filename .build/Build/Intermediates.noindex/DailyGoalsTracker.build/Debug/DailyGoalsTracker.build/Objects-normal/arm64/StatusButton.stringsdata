@@ -1,0 +1,16 @@
+{
+  "source": "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/Views/StatusButton.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Tap to change status",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 35
+        }
+      }
+    ]
+  },
+  "version": 1
+}

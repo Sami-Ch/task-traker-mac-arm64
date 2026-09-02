@@ -1,0 +1,32 @@
+{
+  "source": "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/Views/PopoverView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Big Picture",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 100
+        }
+      },
+      {
+        "comment": "",
+        "key": "Today",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 111
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 136
+        }
+      }
+    ]
+  },
+  "version": 1
+}

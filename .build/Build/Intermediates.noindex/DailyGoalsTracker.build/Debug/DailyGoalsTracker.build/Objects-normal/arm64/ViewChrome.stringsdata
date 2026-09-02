@@ -1,0 +1,16 @@
+{
+  "source": "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/Views/ViewChrome.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 61
+        }
+      }
+    ]
+  },
+  "version": 1
+}

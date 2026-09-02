@@ -1,0 +1,2 @@
+Target dependency graph (1 target)
+Target 'DailyGoalsTracker' in project 'DailyGoalsTracker' (no dependencies)

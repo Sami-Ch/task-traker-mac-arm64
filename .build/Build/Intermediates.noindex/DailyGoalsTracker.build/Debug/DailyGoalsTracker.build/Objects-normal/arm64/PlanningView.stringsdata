@@ -1,0 +1,64 @@
+{
+  "source": "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/Views/PlanningView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "%lld/%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 147
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a goal...",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 185
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Goal",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 289
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 283
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 294
+        }
+      },
+      {
+        "comment": "",
+        "key": "Goal title",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 305
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes (optional)",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 308
+        }
+      }
+    ]
+  },
+  "version": 1
+}

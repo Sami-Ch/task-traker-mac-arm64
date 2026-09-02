@@ -1,0 +1,23 @@
+{
+  "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/AppDelegate.swift" : {
+    "const-values" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/AppDelegate.swiftconstvalues",
+    "dependencies" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/AppDelegate.d",
+    "diagnostics" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/AppDelegate.dia",
+    "object" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/AppDelegate.o",
+    "swift-dependencies" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/AppDelegate.swiftdeps"
+  },
+  "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/DailyGoalsTrackerApp.swift" : {
+    "const-values" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/DailyGoalsTrackerApp.swiftconstvalues",
+    "dependencies" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/DailyGoalsTrackerApp.d",
+    "diagnostics" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/DailyGoalsTrackerApp.dia",
+    "object" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/DailyGoalsTrackerApp.o",
+    "swift-dependencies" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/DailyGoalsTrackerApp.swiftdeps"
+  },
+  "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker/Models/Goal.swift" : {
+    "const-values" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/Goal.swiftconstvalues",
+    "dependencies" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/Goal.d",
+    "diagnostics" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/Goal.dia",
+    "object" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/Goal.o",
+    "swift-dependencies" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/DailyGoalsTracker.build/Debug/DailyGoalsTracker.build/Objects-normal/arm64/Goal.swiftdeps"
+  }
+}

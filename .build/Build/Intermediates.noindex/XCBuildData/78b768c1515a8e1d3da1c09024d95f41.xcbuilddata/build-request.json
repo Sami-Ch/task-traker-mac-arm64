@@ -1,0 +1,64 @@
+{
+  "buildCommand" : {
+    "command" : "build",
+    "skipDependencies" : false,
+    "style" : "buildOnly"
+  },
+  "configuredTargets" : [
+    {
+      "guid" : "ef3f921902b3db1881dc6059bc413af1f36a40a6d19759acd76139f9143c8c33"
+    }
+  ],
+  "containerPath" : "/Users/sami/Desktop/My projects/daily-goals-tracker/DailyGoalsTracker.xcodeproj",
+  "continueBuildingAfterErrors" : false,
+  "dependencyScope" : "workspace",
+  "enableIndexBuildArena" : false,
+  "hideShellScriptEnvironment" : false,
+  "parameters" : {
+    "action" : "build",
+    "activeArchitecture" : "arm64",
+    "activeRunDestination" : {
+      "disableOnlyActiveArch" : false,
+      "platform" : "macosx",
+      "sdk" : "macosx26.2",
+      "sdkVariant" : "macos",
+      "supportedArchitectures" : [
+        "arm64e",
+        "arm64",
+        "x86_64"
+      ],
+      "targetArchitecture" : "arm64"
+    },
+    "arenaInfo" : {
+      "buildIntermediatesPath" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex",
+      "buildProductsPath" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Products",
+      "derivedDataPath" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build",
+      "indexDataStoreFolderPath" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Index.noindex/DataStore",
+      "indexEnableDataStore" : true,
+      "indexPCHPath" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Index.noindex/PrecompiledHeaders",
+      "pchPath" : "/Users/sami/Desktop/My projects/daily-goals-tracker/.build/Build/Intermediates.noindex/PrecompiledHeaders"
+    },
+    "configurationName" : "Debug",
+    "overrides" : {
+      "commandLine" : {
+        "table" : {
+
+        }
+      },
+      "synthesized" : {
+        "table" : {
+          "ACTION" : "build",
+          "ENABLE_PREVIEWS" : "NO",
+          "ENABLE_XOJIT_PREVIEWS" : "YES",
+          "ONLY_ACTIVE_ARCH" : "YES"
+        }
+      }
+    }
+  },
+  "schemeCommand" : "launch",
+  "showNonLoggedProgress" : true,
+  "useDryRun" : false,
+  "useImplicitDependencies" : true,
+  "useLegacyBuildLocations" : false,
+  "useParallelTargets" : true
+}
