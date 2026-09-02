@@ -65,7 +65,7 @@ struct DayView: View {
             LazyVStack(spacing: 2) {
                 ForEach(dayGoals.tracked) { goal in
                     let entry = dataStore.getEntry(for: goal.id, on: selectedDate)
-                    GoalRow(goal: goal, entry: entry, showsEssentialBadge: goal.isEssential) {
+                    GoalRow(goal: goal, entry: entry) {
                         dataStore.cycleStatus(for: goal.id, on: selectedDate)
                     }
                 }

@@ -9,6 +9,7 @@ final class DataStore {
     var entries: [String: GoalEntry] = [:]  // Key: "goalId_date"
     var planningGoals: [PlanningGoal] = []  // Big picture goals
     var dayRecords: [String: DayRecord] = [:]  // Key: date string
+    var dayModes: [DayMode] = []
     
     // MARK: - File Paths
     private let fileManager = FileManager.default
@@ -38,6 +39,10 @@ final class DataStore {
         appSupportURL.appendingPathComponent("day_records.json")
     }
     
+    private var dayModesFileURL: URL {
+        appSupportURL.appendingPathComponent("day_modes.json")
+    }
+    
     // MARK: - Initialization
     init() {
         loadData()
@@ -47,6 +52,8 @@ final class DataStore {
             goals = Goal.samples
             saveGoals()
         }
+        
+        ensureDayModes()
     }
     
     // MARK: - Data Loading
@@ -55,6 +62,7 @@ final class DataStore {
         loadEntries()
         loadPlanningGoals()
         loadDayRecords()
+        loadDayModes()
     }
     
     private func loadGoals() {
@@ -89,6 +97,22 @@ final class DataStore {
         dayRecords = Dictionary(uniqueKeysWithValues: decoded.map { ($0.dateString, $0) })
     }
     
+    private func loadDayModes() {
+        guard let data = try? Data(contentsOf: dayModesFileURL),
+              let decoded = try? JSONDecoder().decode([DayMode].self, from: data) else {
+            return
+        }
+        dayModes = decoded.sorted { $0.order < $1.order }
+    }
+    
+    /// Seed default modes (and migrate old `isEssential` flags into accepted goal lists).
+    private func ensureDayModes() {
+        guard dayModes.isEmpty else { return }
+        let essentialIds = goals.filter(\.isEssential).map(\.id)
+        dayModes = DayMode.defaults(acceptedGoalIds: essentialIds)
+        saveDayModes()
+    }
+    
     // MARK: - Data Saving
     private func saveGoals() {
         guard let data = try? JSONEncoder().encode(goals) else { return }
@@ -112,6 +136,11 @@ final class DataStore {
         try? data.write(to: dayRecordsFileURL)
     }
     
+    private func saveDayModes() {
+        guard let data = try? JSONEncoder().encode(dayModes) else { return }
+        try? data.write(to: dayModesFileURL)
+    }
+    
     // MARK: - Goal Management
     func addGoal(_ goal: Goal) {
         var newGoal = goal
@@ -129,14 +158,16 @@ final class DataStore {
     
     func deleteGoal(_ goal: Goal) {
         goals.removeAll { $0.id == goal.id }
-        // Reorder remaining goals
         for (index, _) in goals.enumerated() {
             goals[index].order = index
         }
-        // Remove associated entries
         entries = entries.filter { !$0.key.hasPrefix(goal.id.uuidString) }
+        for i in dayModes.indices {
+            dayModes[i].acceptedGoalIds.removeAll { $0 == goal.id }
+        }
         saveGoals()
         saveEntries()
+        saveDayModes()
     }
     
     func moveGoal(from source: IndexSet, to destination: Int) {
@@ -188,7 +219,77 @@ final class DataStore {
         saveEntries()
     }
     
-    // MARK: - Day Mode
+    // MARK: - Day Modes
+    
+    var sortedDayModes: [DayMode] {
+        dayModes.sorted { $0.order < $1.order }
+    }
+    
+    func mode(for id: String) -> DayMode {
+        dayModes.first { $0.id == id }
+            ?? dayModes.first(where: \.tracksAllGoals)
+            ?? DayMode.normalFallback
+    }
+    
+    func mode(for date: Date) -> DayMode {
+        mode(for: getDayRecord(for: date).modeId)
+    }
+    
+    func addDayMode(_ mode: DayMode) {
+        var newMode = mode
+        newMode.order = dayModes.count
+        dayModes.append(newMode)
+        saveDayModes()
+    }
+    
+    func updateDayMode(_ mode: DayMode) {
+        guard let index = dayModes.firstIndex(where: { $0.id == mode.id }) else { return }
+        var updated = mode
+        if dayModes[index].id == DayMode.normalId {
+            updated.tracksAllGoals = true
+            updated.acceptedGoalIds = []
+        }
+        dayModes[index] = updated
+        saveDayModes()
+    }
+    
+    func deleteDayMode(_ mode: DayMode) {
+        guard mode.id != DayMode.normalId, !mode.tracksAllGoals else { return }
+        dayModes.removeAll { $0.id == mode.id }
+        for (index, _) in dayModes.enumerated() {
+            dayModes[index].order = index
+        }
+        let normalId = dayModes.first(where: \.tracksAllGoals)?.id ?? DayMode.normalId
+        for key in dayRecords.keys {
+            if dayRecords[key]?.modeId == mode.id {
+                dayRecords[key]?.modeId = normalId
+            }
+        }
+        dayRecords = dayRecords.filter { $0.value.modeId != normalId || $0.value.note != nil }
+        saveDayModes()
+        saveDayRecords()
+    }
+    
+    func moveDayMode(from source: IndexSet, to destination: Int) {
+        dayModes.move(fromOffsets: source, toOffset: destination)
+        for (index, _) in dayModes.enumerated() {
+            dayModes[index].order = index
+        }
+        saveDayModes()
+    }
+    
+    func toggleAcceptedGoal(_ goalId: UUID, for modeId: String) {
+        guard let index = dayModes.firstIndex(where: { $0.id == modeId }) else { return }
+        guard !dayModes[index].tracksAllGoals else { return }
+        if let existing = dayModes[index].acceptedGoalIds.firstIndex(of: goalId) {
+            dayModes[index].acceptedGoalIds.remove(at: existing)
+        } else {
+            dayModes[index].acceptedGoalIds.append(goalId)
+        }
+        saveDayModes()
+    }
+    
+    // MARK: - Day Mode (per date)
     
     func getDayRecord(for date: Date) -> DayRecord {
         let key = GoalEntry.dateString(from: date)
@@ -197,41 +298,43 @@ final class DataStore {
     
     func setDayMode(_ mode: DayMode, for date: Date, note: String? = nil) {
         let key = GoalEntry.dateString(from: date)
-        if mode == .normal && note == nil {
+        let resolved = self.mode(for: mode.id)
+        if resolved.tracksAllGoals && note == nil {
             dayRecords.removeValue(forKey: key)
         } else {
             var record = dayRecords[key] ?? DayRecord(date: date)
-            record.mode = mode
+            record.modeId = resolved.id
             if let note { record.note = note }
             dayRecords[key] = record
         }
         saveDayRecords()
     }
     
-    /// Goals that apply on a given day (respects special-day essential filter).
+    /// Goals that apply on a given day (respects each mode's accepted goal list).
     func goalsForDay(_ date: Date) -> (tracked: [Goal], skipped: [Goal]) {
         let active = goals.filter(\.isActive)
-        let mode = getDayRecord(for: date).mode
+        let dayMode = mode(for: date)
         
-        guard mode.tracksEssentialOnly else {
+        if dayMode.tracksAllGoals {
             return (active, [])
         }
         
-        let essential = active.filter(\.isEssential)
-        let skipped = active.filter { !$0.isEssential }
-        return (essential, skipped)
+        let accepted = Set(dayMode.acceptedGoalIds)
+        let tracked = active.filter { accepted.contains($0.id) }
+        let skipped = active.filter { !accepted.contains($0.id) }
+        return (tracked, skipped)
     }
     
     // MARK: - Statistics
     func getDailySummary(for date: Date) -> DailySummary {
-        let mode = getDayRecord(for: date).mode
+        let dayMode = mode(for: date)
         let (tracked, skipped) = goalsForDay(date)
         let dayEntries = tracked.map { getEntry(for: $0.id, on: date) }
         return DailySummary(
             date: date,
             entries: dayEntries,
             totalGoals: tracked.count,
-            dayMode: mode,
+            dayMode: dayMode,
             skippedCount: skipped.count
         )
     }
@@ -270,7 +373,7 @@ final class DataStore {
         return summaries
     }
     
-    /// Streak: consecutive days meeting tracked goal target (essential-only on special days).
+    /// Streak: consecutive days meeting tracked goal target for that day's mode.
     func getCurrentStreak() -> Int {
         let calendar = Calendar.current
         var streak = 0
@@ -296,7 +399,6 @@ final class DataStore {
     
     // MARK: - Planning Goals Management
     
-    /// Get planning goals for a specific horizon and period
     func getPlanningGoals(for horizon: PlanningHorizon, periodKey: String? = nil) -> [PlanningGoal] {
         let key = periodKey ?? horizon.periodKey()
         return planningGoals
@@ -304,7 +406,6 @@ final class DataStore {
             .sorted { $0.order < $1.order }
     }
     
-    /// Add a new planning goal
     func addPlanningGoal(_ goal: PlanningGoal) {
         var newGoal = goal
         let existingCount = getPlanningGoals(for: goal.horizon, periodKey: goal.periodKey).count
@@ -313,7 +414,6 @@ final class DataStore {
         savePlanningGoals()
     }
     
-    /// Update a planning goal
     func updatePlanningGoal(_ goal: PlanningGoal) {
         if let index = planningGoals.firstIndex(where: { $0.id == goal.id }) {
             planningGoals[index] = goal
@@ -321,7 +421,6 @@ final class DataStore {
         }
     }
     
-    /// Toggle planning goal completion
     func togglePlanningGoalCompletion(_ goalId: UUID) {
         if let index = planningGoals.firstIndex(where: { $0.id == goalId }) {
             planningGoals[index].isCompleted.toggle()
@@ -330,10 +429,8 @@ final class DataStore {
         }
     }
     
-    /// Delete a planning goal
     func deletePlanningGoal(_ goal: PlanningGoal) {
         planningGoals.removeAll { $0.id == goal.id }
-        // Reorder remaining goals in same horizon/period
         let goalsToReorder = getPlanningGoals(for: goal.horizon, periodKey: goal.periodKey)
         for (index, g) in goalsToReorder.enumerated() {
             if let i = planningGoals.firstIndex(where: { $0.id == g.id }) {
@@ -343,12 +440,10 @@ final class DataStore {
         savePlanningGoals()
     }
     
-    /// Move planning goals within same horizon
     func movePlanningGoal(for horizon: PlanningHorizon, periodKey: String, from source: IndexSet, to destination: Int) {
         var goalsForPeriod = getPlanningGoals(for: horizon, periodKey: periodKey)
         goalsForPeriod.move(fromOffsets: source, toOffset: destination)
         
-        // Update orders
         for (index, goal) in goalsForPeriod.enumerated() {
             if let i = planningGoals.firstIndex(where: { $0.id == goal.id }) {
                 planningGoals[i].order = index
@@ -357,7 +452,6 @@ final class DataStore {
         savePlanningGoals()
     }
     
-    /// Get completion stats for a horizon
     func getPlanningStats(for horizon: PlanningHorizon, periodKey: String? = nil) -> (completed: Int, total: Int) {
         let goals = getPlanningGoals(for: horizon, periodKey: periodKey)
         let completed = goals.filter { $0.isCompleted }.count

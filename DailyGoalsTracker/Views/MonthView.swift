@@ -167,7 +167,7 @@ private struct CalendarDayCell: View {
     
     private var backgroundColor: Color {
         if summary?.isSpecialDay == true {
-            let mode = summary?.dayMode ?? .normal
+            let mode = summary?.dayMode ?? DayMode.normalFallback
             return mode.color.opacity(0.15 + progress * 0.35)
         }
         if progress == 0 {

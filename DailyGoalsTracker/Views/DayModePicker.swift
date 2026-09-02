@@ -1,19 +1,19 @@
 import SwiftUI
 
-/// Compact picker to mark today as fasting, trip, rest, etc.
+/// Compact picker to mark today with a day mode (Normal, Fasting, custom, etc.).
 struct DayModePicker: View {
     @Environment(DataStore.self) private var dataStore
     let date: Date
     
     private var currentMode: DayMode {
-        dataStore.getDayRecord(for: date).mode
+        dataStore.mode(for: date)
     }
     
     var body: some View {
         VStack(spacing: 6) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(DayMode.allCases) { mode in
+                    ForEach(dataStore.sortedDayModes) { mode in
                         modeChip(mode)
                     }
                 }
@@ -28,7 +28,7 @@ struct DayModePicker: View {
     }
     
     private func modeChip(_ mode: DayMode) -> some View {
-        let selected = currentMode == mode
+        let selected = currentMode.id == mode.id
         
         return Button {
             dataStore.setDayMode(mode, for: date)
@@ -52,16 +52,21 @@ struct DayModePicker: View {
     }
     
     private var specialDayBanner: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "star.fill")
+        let trackedCount = dataStore.goalsForDay(date).tracked.count
+        let skippedCount = dataStore.goalsForDay(date).skipped.count
+        
+        return HStack(spacing: 6) {
+            Image(systemName: currentMode.icon)
                 .font(.system(size: 9))
-                .foregroundStyle(.yellow)
-            Text("Only essential goals count today")
+                .foregroundStyle(currentMode.color)
+            Text(trackedCount == 0
+                 ? "No goals selected for \(currentMode.title)"
+                 : "\(trackedCount) goal\(trackedCount == 1 ? "" : "s") for \(currentMode.title)")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            if dataStore.goalsForDay(date).skipped.count > 0 {
-                Text("\(dataStore.goalsForDay(date).skipped.count) skipped")
+            if skippedCount > 0 {
+                Text("\(skippedCount) skipped")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
