@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// Weekly goals view — fixed-size rows so 1 goal and 10 goals look the same.
+/// Weekly goals view — label column expands to fill the wider popover.
 struct WeekView: View {
     @Environment(DataStore.self) private var dataStore
     @Binding var selectedDate: Date
     
     private let calendar = Calendar.current
-    private let labelColumnWidth: CGFloat = 88
-    private let dayColumnWidth: CGFloat = 28
-    private let rowHeight: CGFloat = 24
-    private let headerRowHeight: CGFloat = 22
+    private let dayColumnWidth: CGFloat = 32
+    private let rowHeight: CGFloat = 28
+    private let headerRowHeight: CGFloat = 28
+    private let horizontalPadding: CGFloat = 12
     
     private var weekStart: Date {
         calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedDate))!
@@ -58,13 +58,13 @@ struct WeekView: View {
     
     private var goalRows: some View {
         ScrollView {
-            LazyVStack(spacing: 2) {
+            LazyVStack(spacing: 3) {
                 if activeGoals.isEmpty {
                     Text("No active goals")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, horizontalPadding)
                         .frame(height: rowHeight)
                 } else {
                     ForEach(activeGoals) { goal in
@@ -72,7 +72,8 @@ struct WeekView: View {
                     }
                 }
             }
-            .padding(.top, 2)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
         }
         .scrollBounceBehavior(.basedOnSize)
         .defaultScrollAnchor(.top)
@@ -109,23 +110,27 @@ struct WeekView: View {
     
     private var compactDayHeaders: some View {
         HStack(spacing: 0) {
-            Color.clear.frame(width: labelColumnWidth, height: headerRowHeight)
+            Text("Goal")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             
             ForEach(weekDates, id: \.self) { date in
-                VStack(spacing: 0) {
+                let isToday = calendar.isDateInToday(date)
+                VStack(spacing: 1) {
                     Text(dayName(for: date))
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(isToday ? AnyShapeStyle(.blue) : AnyShapeStyle(.tertiary))
                     Text(dayNumber(for: date))
-                        .font(.system(size: 10, weight: calendar.isDateInToday(date) ? .bold : .regular))
-                        .foregroundStyle(calendar.isDateInToday(date) ? .blue : .primary)
+                        .font(.system(size: 11, weight: isToday ? .bold : .regular))
+                        .foregroundStyle(isToday ? AnyShapeStyle(.blue) : AnyShapeStyle(.primary))
                 }
                 .frame(width: dayColumnWidth, height: headerRowHeight)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 4)
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, horizontalPadding)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
     }
     
     private func dayName(for date: Date) -> String {
@@ -142,13 +147,15 @@ struct WeekView: View {
     
     private func weekGoalRow(for goal: Goal) -> some View {
         HStack(spacing: 0) {
-            HStack(spacing: 4) {
-                GoalIconView(icon: goal.icon, size: 9)
+            HStack(spacing: 6) {
+                GoalIconView(icon: goal.icon, size: 11)
                 Text(goal.title)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .frame(width: labelColumnWidth, height: rowHeight, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(goal.title)
             
             ForEach(weekDates, id: \.self) { date in
                 let tracked = dataStore.isGoalTracked(goal, on: date)
@@ -158,27 +165,26 @@ struct WeekView: View {
                     Button {
                         dataStore.cycleStatus(for: goal.id, on: date)
                     } label: {
-                        StatusDot(status: entry.status, size: 12)
+                        StatusDot(status: entry.status, size: 14)
                             .frame(width: dayColumnWidth, height: rowHeight)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 } else {
                     Text("–")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.tertiary)
                         .frame(width: dayColumnWidth, height: rowHeight)
                 }
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, horizontalPadding)
         .frame(height: rowHeight)
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
 #Preview("Week View") {
     WeekView(selectedDate: .constant(Date()))
         .environment(DataStore())
-        .frame(width: 340, height: 520)
+        .frame(width: 400, height: 600)
 }

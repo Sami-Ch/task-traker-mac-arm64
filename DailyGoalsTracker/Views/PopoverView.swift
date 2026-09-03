@@ -36,15 +36,15 @@ struct PopoverView: View {
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
         }
-        .frame(width: 340, height: 520)
+        .frame(width: 400, height: 600)
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingAddGoal) {
             GoalEditorSheet(goal: nil)
-                .frame(width: 340, height: 420)
+                .frame(width: 400, height: 420)
         }
         .sheet(item: $editingGoal) { goal in
             GoalEditorSheet(goal: goal)
-                .frame(width: 340, height: 420)
+                .frame(width: 400, height: 420)
         }
         .environment(\.closeSettings, CloseSettingsAction {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {

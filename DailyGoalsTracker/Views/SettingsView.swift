@@ -166,11 +166,11 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .sheet(isPresented: $showingAddGoal) {
             GoalEditorSheet(goal: nil)
-                .frame(width: 340, height: 420)
+                .frame(width: 400, height: 420)
         }
         .sheet(item: $editingGoal) { goal in
             GoalEditorSheet(goal: goal)
-                .frame(width: 340, height: 420)
+                .frame(width: 400, height: 420)
         }
     }
     
@@ -196,11 +196,11 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .sheet(isPresented: $showingAddMode) {
             ModeEditorSheet(mode: nil)
-                .frame(width: 340, height: 480)
+                .frame(width: 400, height: 480)
         }
         .sheet(item: $editingMode) { mode in
             ModeEditorSheet(mode: mode)
-                .frame(width: 340, height: 480)
+                .frame(width: 400, height: 480)
         }
     }
     
@@ -777,17 +777,17 @@ struct ModeEditorSheet: View {
     SettingsView()
         .environment(DataStore())
         .environment(PrayerService())
-        .frame(width: 340, height: 480)
+        .frame(width: 400, height: 600)
 }
 
 #Preview("Goal Editor") {
     GoalEditorSheet(goal: nil)
         .environment(DataStore())
-        .frame(width: 340, height: 400)
+        .frame(width: 400, height: 420)
 }
 
 #Preview("Mode Editor") {
     ModeEditorSheet(mode: nil)
         .environment(DataStore())
-        .frame(width: 340, height: 480)
+        .frame(width: 400, height: 480)
 }

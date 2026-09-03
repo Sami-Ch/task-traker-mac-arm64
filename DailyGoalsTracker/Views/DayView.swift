@@ -109,5 +109,5 @@ struct DayView: View {
     DayView(selectedDate: .constant(Date()))
         .environment(DataStore())
         .environment(PrayerService())
-        .frame(width: 340, height: 480)
+        .frame(width: 400, height: 600)
 }

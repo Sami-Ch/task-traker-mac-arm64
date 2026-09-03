@@ -332,5 +332,5 @@ struct PlanningGoalEditor: View {
 #Preview("Planning View") {
     PlanningView()
         .environment(DataStore())
-        .frame(width: 340, height: 500)
+        .frame(width: 400, height: 600)
 }

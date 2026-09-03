@@ -218,5 +218,5 @@ private struct CalendarDayCell: View {
 #Preview("Month View") {
     MonthView(selectedDate: .constant(Date()))
         .environment(DataStore())
-        .frame(width: 340, height: 520)
+        .frame(width: 400, height: 600)
 }
