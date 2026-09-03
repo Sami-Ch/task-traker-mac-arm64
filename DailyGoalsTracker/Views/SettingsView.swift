@@ -3,6 +3,7 @@ import SwiftUI
 /// Settings hub with Goals and Modes panels.
 struct SettingsView: View {
     @Environment(DataStore.self) private var dataStore
+    @Environment(PrayerService.self) private var prayer
     @Environment(\.closeSettings) private var closeSettings
     
     @State private var panel: SettingsPanel = .goals
@@ -14,11 +15,13 @@ struct SettingsView: View {
     private enum SettingsPanel: String, CaseIterable {
         case goals = "Goals"
         case modes = "Modes"
+        case prayer = "Prayer"
         
         var icon: String {
             switch self {
             case .goals: return "checklist"
             case .modes: return "circle.grid.2x2.fill"
+            case .prayer: return "moon.stars.fill"
             }
         }
     }
@@ -38,6 +41,8 @@ struct SettingsView: View {
                     goalsList
                 case .modes:
                     modesList
+                case .prayer:
+                    PrayerSettingsPanel()
                 }
             }
             
@@ -60,27 +65,51 @@ struct SettingsView: View {
             
             Spacer()
             
-            Text(panel == .goals ? "Track Goals" : "Day Modes")
+            Text(headerTitle)
                 .font(.system(size: 15, weight: .semibold))
             
             Spacer()
             
-            Button {
-                if panel == .goals {
-                    showingAddGoal = true
-                } else {
-                    showingAddMode = true
+            if panel == .prayer {
+                Button {
+                    Task { await prayerRefresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.blue)
                 }
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(.blue)
+                .buttonStyle(.plain)
+                .help("Refresh prayer times")
+            } else {
+                Button {
+                    if panel == .goals {
+                        showingAddGoal = true
+                    } else {
+                        showingAddMode = true
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+                .help(panel == .goals ? "Add goal" : "Add mode")
             }
-            .buttonStyle(.plain)
-            .help(panel == .goals ? "Add goal" : "Add mode")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+    
+    private var headerTitle: String {
+        switch panel {
+        case .goals: return "Track Goals"
+        case .modes: return "Day Modes"
+        case .prayer: return "Prayer Times"
+        }
+    }
+    
+    private func prayerRefresh() async {
+        await prayer.refresh()
     }
     
     // MARK: - Panel Picker
@@ -178,7 +207,8 @@ struct SettingsView: View {
     // MARK: - Footer
     private var footer: some View {
         HStack {
-            if panel == .goals {
+            switch panel {
+            case .goals:
                 Text("\(dataStore.goals.filter(\.isActive).count) active goals")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -186,12 +216,26 @@ struct SettingsView: View {
                 Text("Toggle to enable tracking")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
-            } else {
+            case .modes:
                 Text("\(dataStore.dayModes.count) modes")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text("Assign goals per mode")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            case .prayer:
+                if prayer.isEnabled, let next = prayer.nextPrayer {
+                    Text("Next: \(next.name.rawValue)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(prayer.isEnabled ? "Calculating…" : "Prayer alerts off")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("Aladhan + your location")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
@@ -732,6 +776,7 @@ struct ModeEditorSheet: View {
 #Preview("Settings View") {
     SettingsView()
         .environment(DataStore())
+        .environment(PrayerService())
         .frame(width: 340, height: 480)
 }
 

@@ -14,12 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var hotKeyRef: EventHotKeyRef?
     
     let dataStore = DataStore()
+    let prayerService = PrayerService()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         setupPopover()
         setupEventMonitor()
         setupGlobalHotKey()
+        prayerService.bootstrap()
     }
     
     // MARK: - Status Item Setup
@@ -47,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         
         let contentView = PopoverView()
             .environment(dataStore)
+            .environment(prayerService)
         popover.contentViewController = NSHostingController(rootView: contentView)
     }
     
@@ -116,6 +119,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         summaryMenuItem.isEnabled = false
         menu.addItem(summaryMenuItem)
         
+        if prayerService.isEnabled, let next = prayerService.nextPrayer {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            let prayerItem = NSMenuItem(
+                title: "Next prayer: \(next.name.rawValue) at \(formatter.string(from: next.date))",
+                action: nil,
+                keyEquivalent: ""
+            )
+            prayerItem.isEnabled = false
+            menu.addItem(prayerItem)
+        }
+        
         menu.addItem(NSMenuItem.separator())
         
         menu.addItem(NSMenuItem(title: "Open Goals Tracker", action: #selector(togglePopover), keyEquivalent: "g"))
@@ -144,6 +159,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // MARK: - NSPopoverDelegate
     func popoverWillShow(_ notification: Notification) {
         NotificationCenter.default.post(name: .resetPopoverToToday, object: nil)
+        Task {
+            await prayerService.refresh()
+        }
     }
     
     func popoverDidClose(_ notification: Notification) {

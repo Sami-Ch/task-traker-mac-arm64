@@ -180,5 +180,5 @@ struct WeekView: View {
 #Preview("Week View") {
     WeekView(selectedDate: .constant(Date()))
         .environment(DataStore())
-        .frame(width: 340, height: 480)
+        .frame(width: 340, height: 520)
 }

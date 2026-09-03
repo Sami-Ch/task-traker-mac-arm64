@@ -28,6 +28,9 @@
 		A1000019 /* GoalIconPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021; };
 		A1000020 /* DayMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022; };
 		A1000021 /* DayModePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023; };
+		A1000022 /* PrayerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024; };
+		A1000023 /* PrayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025; };
+		A1000024 /* PrayerViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +57,9 @@
 		A2000021 /* GoalIconPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalIconPalette.swift; sourceTree = "<group>"; };
 		A2000022 /* DayMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayMode.swift; sourceTree = "<group>"; };
 		A2000023 /* DayModePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayModePicker.swift; sourceTree = "<group>"; };
+		A2000024 /* PrayerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrayerModels.swift; sourceTree = "<group>"; };
+		A2000025 /* PrayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrayerService.swift; sourceTree = "<group>"; };
+		A2000026 /* PrayerViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrayerViews.swift; sourceTree = "<group>"; };
 		A3000001 /* DailyGoalsTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyGoalsTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -83,6 +89,7 @@
 				A2000002 /* AppDelegate.swift */,
 				A5000003 /* Models */,
 				A5000004 /* Storage */,
+				A5000008 /* Services */,
 				A5000005 /* Views */,
 				A5000007 /* Resources */,
 				A2000016 /* Info.plist */,
@@ -100,6 +107,7 @@
 				A2000018 /* PlanningGoal.swift */,
 				A2000021 /* GoalIconPalette.swift */,
 				A2000022 /* DayMode.swift */,
+				A2000024 /* PrayerModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -110,6 +118,14 @@
 				A2000006 /* DataStore.swift */,
 			);
 			path = Storage;
+			sourceTree = "<group>";
+		};
+		A5000008 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A2000025 /* PrayerService.swift */,
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 		A5000005 /* Views */ = {
@@ -126,6 +142,7 @@
 				A2000019 /* PlanningView.swift */,
 				A2000020 /* ViewChrome.swift */,
 				A2000023 /* DayModePicker.swift */,
+				A2000026 /* PrayerViews.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -235,6 +252,9 @@
 				A1000019 /* GoalIconPalette.swift in Sources */,
 				A1000020 /* DayMode.swift in Sources */,
 				A1000021 /* DayModePicker.swift in Sources */,
+				A1000022 /* PrayerModels.swift in Sources */,
+				A1000023 /* PrayerService.swift in Sources */,
+				A1000024 /* PrayerViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

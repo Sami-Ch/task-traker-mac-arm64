@@ -34,6 +34,8 @@ struct DayView: View {
             
             DayModePicker(date: selectedDate)
             
+            NextPrayerBanner()
+            
             Divider().padding(.horizontal)
             
             HStack(spacing: 8) {
@@ -106,5 +108,6 @@ struct DayView: View {
 #Preview("Day View") {
     DayView(selectedDate: .constant(Date()))
         .environment(DataStore())
+        .environment(PrayerService())
         .frame(width: 340, height: 480)
 }
