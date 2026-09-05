@@ -7,14 +7,16 @@ extension Notification.Name {
 }
 
 /// AppDelegate managing the menu bar status item and popover
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var eventMonitor: Any?
     private var hotKeyRef: EventHotKeyRef?
+    private var journalWindow: NSWindow?
     
     let dataStore = DataStore()
     let prayerService = PrayerService()
+    let journalState = JournalWindowState()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -50,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let contentView = PopoverView()
             .environment(dataStore)
             .environment(prayerService)
+            .environment(\.openJournal, OpenJournalAction { [weak self] date in
+                self?.showJournalWindow(for: date)
+            })
         popover.contentViewController = NSHostingController(rootView: contentView)
     }
     
@@ -134,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         menu.addItem(NSMenuItem.separator())
         
         menu.addItem(NSMenuItem(title: "Open Goals Tracker", action: #selector(togglePopover), keyEquivalent: "g"))
+        menu.addItem(NSMenuItem(title: "Open Journal", action: #selector(openJournalFromMenu), keyEquivalent: "j"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
         
@@ -142,12 +148,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem.menu = nil
     }
     
+    @objc func openJournalFromMenu() {
+        showJournalWindow(for: Date())
+    }
+    
+    func showJournalWindow(for date: Date) {
+        journalState.selectedDate = Calendar.current.startOfDay(for: date)
+        
+        if journalWindow == nil {
+            let content = JournalWindowView(state: journalState)
+                .environment(dataStore)
+            let hosting = NSHostingController(rootView: content)
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "Journal"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.setContentSize(NSSize(width: 520, height: 640))
+            window.minSize = NSSize(width: 420, height: 420)
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            window.center()
+            journalWindow = window
+        }
+        
+        if popover.isShown {
+            popover.performClose(nil)
+        }
+        
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        
+        if let window = journalWindow {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+    
     @objc func quitApp() {
         NSApp.terminate(nil)
     }
     
     // MARK: - Cleanup
     func applicationWillTerminate(_ notification: Notification) {
+        dataStore.setJournal(journalState.draftText, for: journalState.selectedDate)
         if let eventMonitor = eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
@@ -166,5 +210,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     
     func popoverDidClose(_ notification: Notification) {
         // Cleanup when popover closes
+    }
+    
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSWindow) === journalWindow else { return }
+        dataStore.setJournal(journalState.draftText, for: journalState.selectedDate)
+        NSApp.setActivationPolicy(.accessory)
     }
 }

@@ -118,7 +118,8 @@ struct MonthView: View {
                         date: date,
                         summary: monthSummaries[date],
                         isToday: calendar.isDateInToday(date),
-                        isSelected: calendar.isDate(date, inSameDayAs: selectedDate)
+                        isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
+                        hasJournal: dataStore.hasJournal(on: date)
                     ) {
                         onDayTap?(date)
                     }
@@ -159,6 +160,7 @@ private struct CalendarDayCell: View {
     let summary: DailySummary?
     let isToday: Bool
     let isSelected: Bool
+    var hasJournal: Bool = false
     let action: () -> Void
     
     private var progress: Double {
@@ -195,6 +197,14 @@ private struct CalendarDayCell: View {
                         .font(.system(size: 6))
                         .foregroundStyle(summary?.dayMode.color ?? .green)
                         .padding(3)
+                }
+                
+                if hasJournal {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 4, height: 4)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, 3)
                 }
                 
                 if isSelected {

@@ -10,6 +10,7 @@ final class DataStore {
     var planningGoals: [PlanningGoal] = []  // Big picture goals
     var dayRecords: [String: DayRecord] = [:]  // Key: date string
     var dayModes: [DayMode] = []
+    var journals: [String: JournalEntry] = [:]  // Key: date string
     
     // MARK: - File Paths
     private let fileManager = FileManager.default
@@ -43,6 +44,10 @@ final class DataStore {
         appSupportURL.appendingPathComponent("day_modes.json")
     }
     
+    private var journalsFileURL: URL {
+        appSupportURL.appendingPathComponent("journals.json")
+    }
+    
     // MARK: - Initialization
     init() {
         loadData()
@@ -63,6 +68,7 @@ final class DataStore {
         loadPlanningGoals()
         loadDayRecords()
         loadDayModes()
+        loadJournals()
     }
     
     private func loadGoals() {
@@ -105,6 +111,14 @@ final class DataStore {
         dayModes = decoded.sorted { $0.order < $1.order }
     }
     
+    private func loadJournals() {
+        guard let data = try? Data(contentsOf: journalsFileURL),
+              let decoded = try? JSONDecoder().decode([JournalEntry].self, from: data) else {
+            return
+        }
+        journals = Dictionary(uniqueKeysWithValues: decoded.map { ($0.dateString, $0) })
+    }
+    
     /// Seed default modes (and migrate old `isEssential` flags into accepted goal lists).
     private func ensureDayModes() {
         guard dayModes.isEmpty else { return }
@@ -139,6 +153,12 @@ final class DataStore {
     private func saveDayModes() {
         guard let data = try? JSONEncoder().encode(dayModes) else { return }
         try? data.write(to: dayModesFileURL)
+    }
+    
+    private func saveJournals() {
+        let entries = Array(journals.values)
+        guard let data = try? JSONEncoder().encode(entries) else { return }
+        try? data.write(to: journalsFileURL)
     }
     
     // MARK: - Goal Management
@@ -308,6 +328,34 @@ final class DataStore {
             dayRecords[key] = record
         }
         saveDayRecords()
+    }
+    
+    // MARK: - Journal
+    
+    func journal(for date: Date) -> JournalEntry? {
+        journals[GoalEntry.dateString(from: date)]
+    }
+    
+    func journalText(for date: Date) -> String {
+        journal(for: date)?.text ?? ""
+    }
+    
+    func hasJournal(on date: Date) -> Bool {
+        guard let entry = journal(for: date) else { return false }
+        return !entry.isEmpty
+    }
+    
+    func setJournal(_ text: String, for date: Date) {
+        let key = GoalEntry.dateString(from: date)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            if journals.removeValue(forKey: key) != nil {
+                saveJournals()
+            }
+        } else if journals[key]?.text != text {
+            journals[key] = JournalEntry(date: date, text: text)
+            saveJournals()
+        }
     }
     
     /// Goals that apply on a given day (respects each mode's accepted goal list).

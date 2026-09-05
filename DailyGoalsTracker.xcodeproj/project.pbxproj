@@ -31,6 +31,8 @@
 		A1000022 /* PrayerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024; };
 		A1000023 /* PrayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025; };
 		A1000024 /* PrayerViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026; };
+		A1000025 /* JournalEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027; };
+		A1000026 /* JournalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +62,8 @@
 		A2000024 /* PrayerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrayerModels.swift; sourceTree = "<group>"; };
 		A2000025 /* PrayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrayerService.swift; sourceTree = "<group>"; };
 		A2000026 /* PrayerViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrayerViews.swift; sourceTree = "<group>"; };
+		A2000027 /* JournalEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEntry.swift; sourceTree = "<group>"; };
+		A2000028 /* JournalViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalViews.swift; sourceTree = "<group>"; };
 		A3000001 /* DailyGoalsTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyGoalsTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -108,6 +112,7 @@
 				A2000021 /* GoalIconPalette.swift */,
 				A2000022 /* DayMode.swift */,
 				A2000024 /* PrayerModels.swift */,
+				A2000027 /* JournalEntry.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -143,6 +148,7 @@
 				A2000020 /* ViewChrome.swift */,
 				A2000023 /* DayModePicker.swift */,
 				A2000026 /* PrayerViews.swift */,
+				A2000028 /* JournalViews.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -255,6 +261,8 @@
 				A1000022 /* PrayerModels.swift in Sources */,
 				A1000023 /* PrayerService.swift in Sources */,
 				A1000024 /* PrayerViews.swift in Sources */,
+				A1000025 /* JournalEntry.swift in Sources */,
+				A1000026 /* JournalViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -58,6 +58,10 @@ struct DayView: View {
             .frame(height: SummaryStrip.height)
             
             goalRows
+            
+            Divider().padding(.horizontal)
+            
+            JournalPreviewCard(date: selectedDate)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
