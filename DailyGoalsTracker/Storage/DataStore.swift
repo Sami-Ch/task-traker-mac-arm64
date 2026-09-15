@@ -13,6 +13,7 @@ final class DataStore {
     var journals: [String: JournalEntry] = [:]  // Key: date string
     var snapshots: [String: DaySnapshot] = [:]  // Key: date string
     var settings: TrackerSettings = .default
+    var projects: [Project] = []  // Long-running projects with linked goals
     
     /// Used for Maghrib-based day start. Set from AppDelegate.
     weak var prayerService: PrayerService?
@@ -65,6 +66,10 @@ final class DataStore {
         appSupportURL.appendingPathComponent("settings.json")
     }
     
+    private var projectsFileURL: URL {
+        appSupportURL.appendingPathComponent("projects.json")
+    }
+    
     private var civilCalendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
@@ -89,6 +94,7 @@ final class DataStore {
         loadGoals()
         loadEntries()
         loadPlanningGoals()
+        loadProjects()
         loadDayRecords()
         loadDayModes()
         loadJournals()
@@ -118,6 +124,14 @@ final class DataStore {
             return
         }
         planningGoals = decoded.sorted { $0.order < $1.order }
+    }
+    
+    private func loadProjects() {
+        guard let data = try? Data(contentsOf: projectsFileURL),
+              let decoded = try? JSONDecoder().decode([Project].self, from: data) else {
+            return
+        }
+        projects = decoded.sorted { $0.order < $1.order }
     }
     
     private func loadDayRecords() {
@@ -183,6 +197,11 @@ final class DataStore {
     private func savePlanningGoals() {
         guard let data = try? JSONEncoder().encode(planningGoals) else { return }
         try? data.write(to: planningGoalsFileURL)
+    }
+    
+    private func saveProjects() {
+        guard let data = try? JSONEncoder().encode(projects) else { return }
+        try? data.write(to: projectsFileURL)
     }
     
     private func saveDayRecords() {
@@ -852,5 +871,277 @@ final class DataStore {
         let goals = getPlanningGoals(for: horizon, periodKey: periodKey)
         let completed = goals.filter { $0.isCompleted }.count
         return (completed, goals.count)
+    }
+    
+    // MARK: - Projects Management
+    
+    var activeProjects: [Project] {
+        projects.filter { $0.status == .active }.sorted { $0.order < $1.order }
+    }
+    
+    var pausedProjects: [Project] {
+        projects.filter { $0.status == .paused }.sorted { $0.order < $1.order }
+    }
+    
+    var completedProjects: [Project] {
+        projects.filter { $0.status == .completed }.sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
+    }
+    
+    var archivedProjects: [Project] {
+        projects.filter { $0.status == .archived }.sorted { $0.order < $1.order }
+    }
+    
+    func project(for id: UUID) -> Project? {
+        projects.first { $0.id == id }
+    }
+    
+    func addProject(_ project: Project) {
+        var newProject = project
+        newProject.order = projects.count
+        projects.append(newProject)
+        saveProjects()
+    }
+    
+    func updateProject(_ project: Project) {
+        guard let index = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        projects[index] = project
+        saveProjects()
+    }
+    
+    func deleteProject(_ project: Project) {
+        projects.removeAll { $0.id == project.id }
+        reorderProjects()
+        saveProjects()
+    }
+    
+    func moveProject(from source: IndexSet, to destination: Int) {
+        projects.move(fromOffsets: source, toOffset: destination)
+        reorderProjects()
+        saveProjects()
+    }
+    
+    private func reorderProjects() {
+        for (index, _) in projects.enumerated() {
+            projects[index].order = index
+        }
+    }
+    
+    func toggleProjectMilestone(projectId: UUID, milestoneId: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].toggleMilestone(id: milestoneId)
+        saveProjects()
+    }
+    
+    func addMilestone(to projectId: UUID, title: String) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].addMilestone(title)
+        saveProjects()
+    }
+    
+    func removeMilestone(from projectId: UUID, milestoneId: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].removeMilestone(id: milestoneId)
+        saveProjects()
+    }
+    
+    func completeProject(_ projectId: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].complete()
+        saveProjects()
+    }
+    
+    func reopenProject(_ projectId: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].reopen()
+        saveProjects()
+    }
+    
+    func pauseProject(_ projectId: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].pause()
+        saveProjects()
+    }
+    
+    func archiveProject(_ projectId: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].archive()
+        saveProjects()
+    }
+    
+    // MARK: - Project Progress Calculation
+    
+    /// Count of completions for a goal within a date range (for project auto-counting).
+    func completionsForGoal(_ goalId: UUID, in dateRange: ClosedRange<Date>) -> Int {
+        var count = 0
+        var currentDate = GoalEntry.startOfCivilDay(for: dateRange.lowerBound)
+        let endDate = GoalEntry.startOfCivilDay(for: dateRange.upperBound)
+        
+        while currentDate <= endDate {
+            let entry = getEntry(for: goalId, on: currentDate)
+            if entry.status == .done {
+                count += 1
+            }
+            guard let next = civilCalendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
+            currentDate = next
+        }
+        return count
+    }
+    
+    /// Calculate progress for a project (combines linked goal completions and milestones).
+    func projectProgress(for project: Project) -> ProjectProgress {
+        var totalCompletions = 0
+        for goalId in project.linkedGoalIds {
+            totalCompletions += completionsForGoal(goalId, in: project.dateRange)
+        }
+        
+        return ProjectProgress(
+            linkedCompletions: totalCompletions,
+            targetCount: project.targetCount,
+            completedMilestones: project.completedMilestones,
+            totalMilestones: project.totalMilestones
+        )
+    }
+    
+    /// Get goals that are linked to any project (for display purposes).
+    func goalsLinkedToProjects() -> Set<UUID> {
+        var linkedIds = Set<UUID>()
+        for project in projects where project.isActive || project.isPaused {
+            linkedIds.formUnion(project.linkedGoalIds)
+        }
+        return linkedIds
+    }
+    
+    // MARK: - Migration from Planning Goals to Projects
+    
+    /// Check if there are planning goals that could be migrated to projects.
+    var hasPlanningGoalsToMigrate: Bool {
+        !planningGoals.isEmpty
+    }
+    
+    /// Count of planning goals available to migrate.
+    var planningGoalsCount: Int {
+        planningGoals.count
+    }
+    
+    /// Migrate all planning goals to projects.
+    /// - Life goals become open-ended projects
+    /// - Year goals get a target date of end of that year
+    /// - Month goals get a target date of end of that month
+    /// - Week goals get a target date of end of that week
+    func migratePlanningGoalsToProjects() {
+        guard !planningGoals.isEmpty else { return }
+        
+        for planningGoal in planningGoals {
+            let project = convertPlanningGoalToProject(planningGoal)
+            projects.append(project)
+        }
+        
+        // Reorder projects
+        reorderProjects()
+        saveProjects()
+        
+        // Clear planning goals (keep the file for backup)
+        planningGoals = []
+        savePlanningGoals()
+    }
+    
+    private func convertPlanningGoalToProject(_ planningGoal: PlanningGoal) -> Project {
+        let (startDate, targetDate) = datesForPlanningGoal(planningGoal)
+        
+        let status: ProjectStatus = planningGoal.isCompleted ? .completed : .active
+        
+        return Project(
+            title: planningGoal.title,
+            description: "",
+            plan: planningGoal.notes ?? "",
+            startDate: startDate,
+            targetDate: targetDate,
+            status: status,
+            completedAt: planningGoal.completedAt,
+            order: projects.count,
+            colorName: colorForHorizon(planningGoal.horizon),
+            icon: iconForHorizon(planningGoal.horizon)
+        )
+    }
+    
+    private func datesForPlanningGoal(_ goal: PlanningGoal) -> (start: Date, target: Date?) {
+        let created = goal.createdAt
+        
+        switch goal.horizon {
+        case .life:
+            // Life goals have no end date
+            return (created, nil)
+            
+        case .year:
+            // Parse year from period key (e.g., "2026")
+            if let year = Int(goal.periodKey) {
+                var components = DateComponents()
+                components.year = year
+                components.month = 1
+                components.day = 1
+                let startOfYear = civilCalendar.date(from: components) ?? created
+                
+                var endComponents = DateComponents()
+                endComponents.year = year
+                endComponents.month = 12
+                endComponents.day = 31
+                let endOfYear = civilCalendar.date(from: endComponents)
+                
+                return (startOfYear, endOfYear)
+            }
+            return (created, nil)
+            
+        case .month:
+            // Parse month from period key (e.g., "2026-09")
+            let parts = goal.periodKey.split(separator: "-")
+            if parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]) {
+                var startComponents = DateComponents()
+                startComponents.year = year
+                startComponents.month = month
+                startComponents.day = 1
+                let startOfMonth = civilCalendar.date(from: startComponents) ?? created
+                
+                // End of month
+                if let nextMonth = civilCalendar.date(byAdding: .month, value: 1, to: startOfMonth),
+                   let endOfMonth = civilCalendar.date(byAdding: .day, value: -1, to: nextMonth) {
+                    return (startOfMonth, endOfMonth)
+                }
+            }
+            return (created, nil)
+            
+        case .week:
+            // Parse week from period key (e.g., "2026-W37")
+            let parts = goal.periodKey.replacingOccurrences(of: "W", with: "").split(separator: "-")
+            if parts.count == 2, let year = Int(parts[0]), let week = Int(parts[1]) {
+                var startComponents = DateComponents()
+                startComponents.yearForWeekOfYear = year
+                startComponents.weekOfYear = week
+                startComponents.weekday = 2 // Monday
+                let startOfWeek = civilCalendar.date(from: startComponents) ?? created
+                
+                if let endOfWeek = civilCalendar.date(byAdding: .day, value: 6, to: startOfWeek) {
+                    return (startOfWeek, endOfWeek)
+                }
+            }
+            return (created, nil)
+        }
+    }
+    
+    private func colorForHorizon(_ horizon: PlanningHorizon) -> String {
+        switch horizon {
+        case .life: return "purple"
+        case .year: return "blue"
+        case .month: return "green"
+        case .week: return "orange"
+        }
+    }
+    
+    private func iconForHorizon(_ horizon: PlanningHorizon) -> String {
+        switch horizon {
+        case .life: return "star.fill"
+        case .year: return "calendar"
+        case .month: return "calendar.badge.clock"
+        case .week: return "clock.fill"
+        }
     }
 }

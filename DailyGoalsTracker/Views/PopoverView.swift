@@ -6,7 +6,6 @@ struct PopoverView: View {
     
     @State private var selectedTab: ViewTab = .day
     @State private var selectedDate = Date()
-    @State private var showingSettings = false
     @State private var showingAddGoal = false
     @State private var editingGoal: Goal?
     
@@ -14,27 +13,21 @@ struct PopoverView: View {
         case day = "Day"
         case week = "Week"
         case month = "Month"
-        case plan = "Plan"
+        case projects = "Projects"
         
         var icon: String {
             switch self {
             case .day: return "sun.max"
             case .week: return "calendar.day.timeline.leading"
             case .month: return "calendar"
-            case .plan: return "flag.fill"
+            case .projects: return "flag.fill"
             }
         }
     }
     
     var body: some View {
         VStack(spacing: 0) {
-            if showingSettings {
-                SettingsView()
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else {
-                mainContent
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
+            mainContent
         }
         .frame(width: 400, height: 600)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -46,16 +39,10 @@ struct PopoverView: View {
             GoalEditorSheet(goal: goal)
                 .frame(width: 400, height: 520)
         }
-        .environment(\.closeSettings, CloseSettingsAction {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                showingSettings = false
-            }
-        })
         .onReceive(NotificationCenter.default.publisher(for: .resetPopoverToToday)) { _ in
             dataStore.ensureDaySnapshotsCurrent()
             selectedDate = dataStore.logicalDate()
             selectedTab = .day
-            showingSettings = false
         }
         .onAppear {
             dataStore.ensureDaySnapshotsCurrent()
@@ -98,11 +85,11 @@ struct PopoverView: View {
     
     private var leadingLabel: some View {
         Group {
-            if selectedTab == .plan {
+            if selectedTab == .projects {
                 HStack(spacing: 4) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: "flag.fill")
                         .font(.system(size: 11))
-                    Text("Big Picture")
+                    Text("\(dataStore.activeProjects.count) Active")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundStyle(.purple)
@@ -129,7 +116,7 @@ struct PopoverView: View {
     
     /// Constant-size slot: the container always exists, only its contents fade in.
     private var streakSlot: some View {
-        let streak = selectedTab == .plan ? 0 : dataStore.getCurrentStreak()
+        let streak = selectedTab == .projects ? 0 : dataStore.getCurrentStreak()
         
         return Color.clear
             .frame(width: 60, height: 24)
@@ -152,9 +139,7 @@ struct PopoverView: View {
     
     private var settingsButton: some View {
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                showingSettings = true
-            }
+            openSettings()
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 14))
@@ -163,6 +148,13 @@ struct PopoverView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help("Settings (⌘,)")
+    }
+    
+    private func openSettings() {
+        // Menu bar apps can't reliably open SwiftUI's Settings scene;
+        // AppDelegate owns a real NSWindow instead.
+        NotificationCenter.default.post(name: .openSettingsWindow, object: nil)
     }
     
     // MARK: - Tab Picker
@@ -184,7 +176,7 @@ struct PopoverView: View {
                     .background {
                         if selectedTab == tab {
                             Capsule()
-                                .fill(tab == .plan ? Color.purple : Color.blue)
+                                .fill(tab == .projects ? Color.purple : Color.blue)
                         }
                     }
                     .contentShape(Capsule())
@@ -213,8 +205,8 @@ struct PopoverView: View {
                     selectedDate = date
                     selectedTab = .day
                 }
-            case .plan:
-                PlanningView()
+            case .projects:
+                ProjectsView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -222,29 +214,6 @@ struct PopoverView: View {
     }
 }
 
-// MARK: - Settings close action (separate from sheet dismiss)
-private struct CloseSettingsActionKey: EnvironmentKey {
-    static let defaultValue: CloseSettingsAction = CloseSettingsAction {}
-}
-
-extension EnvironmentValues {
-    var closeSettings: CloseSettingsAction {
-        get { self[CloseSettingsActionKey.self] }
-        set { self[CloseSettingsActionKey.self] = newValue }
-    }
-}
-
-struct CloseSettingsAction {
-    let action: () -> Void
-    
-    init(_ action: @escaping () -> Void = {}) {
-        self.action = action
-    }
-    
-    func callAsFunction() {
-        action()
-    }
-}
 
 // MARK: - Preview
 #Preview("Popover View") {

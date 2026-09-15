@@ -5,6 +5,7 @@ import UserNotifications
 
 extension Notification.Name {
     static let resetPopoverToToday = Notification.Name("resetPopoverToToday")
+    static let openSettingsWindow = Notification.Name("openSettingsWindow")
 }
 
 /// AppDelegate managing the menu bar status item and popover
@@ -14,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var eventMonitor: Any?
     private var hotKeyRef: EventHotKeyRef?
     private var journalWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     
     private var freezeTimer: Timer?
     
@@ -33,6 +35,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         appUsageService.bootstrap()
         dataStore.ensureDaySnapshotsCurrent()
         startFreezeTimer()
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openSettingsFromMenu),
+            name: .openSettingsWindow,
+            object: nil
+        )
     }
     
     // MARK: - Status Item Setup
@@ -150,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         
         menu.addItem(NSMenuItem(title: "Open Goals Tracker", action: #selector(togglePopover), keyEquivalent: "g"))
         menu.addItem(NSMenuItem(title: "Open Journal", action: #selector(openJournalFromMenu), keyEquivalent: "j"))
+        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
         
@@ -160,6 +170,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     
     @objc func openJournalFromMenu() {
         showJournalWindow(for: dataStore.logicalDate())
+    }
+    
+    @objc func openSettingsFromMenu() {
+        showSettingsWindow()
+    }
+    
+    func showSettingsWindow() {
+        if settingsWindow == nil {
+            let content = SettingsWindowView()
+                .environment(dataStore)
+                .environment(prayerService)
+                .environment(appUsageService)
+            let hosting = NSHostingController(rootView: content)
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "Settings"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.setContentSize(NSSize(width: 750, height: 550))
+            window.minSize = NSSize(width: 650, height: 450)
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            window.center()
+            settingsWindow = window
+        }
+        
+        if popover.isShown {
+            popover.performClose(nil)
+        }
+        
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        
+        if let window = settingsWindow {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
+        }
     }
     
     func showJournalWindow(for date: Date) {
@@ -236,9 +283,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     
     func windowWillClose(_ notification: Notification) {
-        guard (notification.object as? NSWindow) === journalWindow else { return }
-        dataStore.setJournal(journalState.draftText, for: journalState.selectedDate)
-        NSApp.setActivationPolicy(.accessory)
+        let closing = notification.object as? NSWindow
+        
+        if closing === journalWindow {
+            dataStore.setJournal(journalState.draftText, for: journalState.selectedDate)
+        }
+        
+        // Stay regular while another managed window is still open
+        let journalOpen = journalWindow?.isVisible == true && closing !== journalWindow
+        let settingsOpen = settingsWindow?.isVisible == true && closing !== settingsWindow
+        if !journalOpen && !settingsOpen {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }
 

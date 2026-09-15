@@ -42,6 +42,17 @@
 		A1000033 /* CalendarPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000035; };
 		A1000034 /* ScheduleViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036; };
 		A1000035 /* MarkdownEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037; };
+		A1000040 /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040; };
+		A1000041 /* GeneralSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041; };
+		A1000042 /* GoalsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042; };
+		A1000043 /* ScheduleSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000043; };
+		A1000044 /* ModesSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000044; };
+		A1000045 /* PrayerSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000045; };
+		A1000046 /* AppTimeSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000046; };
+		A1000050 /* Project.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050; };
+		A1000051 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051; };
+		A1000052 /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052; };
+		A1000053 /* ProjectEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000053; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -82,6 +93,17 @@
 		A2000035 /* CalendarPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPresentation.swift; sourceTree = "<group>"; };
 		A2000036 /* ScheduleViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleViews.swift; sourceTree = "<group>"; };
 		A2000037 /* MarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditor.swift; sourceTree = "<group>"; };
+		A2000040 /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
+		A2000041 /* GeneralSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsPane.swift; sourceTree = "<group>"; };
+		A2000042 /* GoalsSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalsSettingsPane.swift; sourceTree = "<group>"; };
+		A2000043 /* ScheduleSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleSettingsPane.swift; sourceTree = "<group>"; };
+		A2000044 /* ModesSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModesSettingsPane.swift; sourceTree = "<group>"; };
+		A2000045 /* PrayerSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrayerSettingsPane.swift; sourceTree = "<group>"; };
+		A2000046 /* AppTimeSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTimeSettingsPane.swift; sourceTree = "<group>"; };
+		A2000050 /* Project.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Project.swift; sourceTree = "<group>"; };
+		A2000051 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
+		A2000052 /* ProjectDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
+		A2000053 /* ProjectEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectEditorSheet.swift; sourceTree = "<group>"; };
 		A3000001 /* DailyGoalsTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyGoalsTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -127,6 +149,7 @@
 				A2000004 /* GoalEntry.swift */,
 				A2000005 /* GoalStatus.swift */,
 				A2000018 /* PlanningGoal.swift */,
+				A2000050 /* Project.swift */,
 				A2000021 /* GoalIconPalette.swift */,
 				A2000022 /* DayMode.swift */,
 				A2000024 /* PrayerModels.swift */,
@@ -160,6 +183,7 @@
 		A5000005 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A5000009 /* Settings */,
 				A2000007 /* PopoverView.swift */,
 				A2000008 /* DayView.swift */,
 				A2000009 /* WeekView.swift */,
@@ -176,8 +200,25 @@
 				A2000031 /* AppTimeViews.swift */,
 				A2000036 /* ScheduleViews.swift */,
 				A2000037 /* MarkdownEditor.swift */,
+				A2000051 /* ProjectsView.swift */,
+				A2000052 /* ProjectDetailView.swift */,
+				A2000053 /* ProjectEditorSheet.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		A5000009 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A2000040 /* SettingsWindow.swift */,
+				A2000041 /* GeneralSettingsPane.swift */,
+				A2000042 /* GoalsSettingsPane.swift */,
+				A2000043 /* ScheduleSettingsPane.swift */,
+				A2000044 /* ModesSettingsPane.swift */,
+				A2000045 /* PrayerSettingsPane.swift */,
+				A2000046 /* AppTimeSettingsPane.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 		A5000006 /* Products */ = {
@@ -299,6 +340,17 @@
 				A1000033 /* CalendarPresentation.swift in Sources */,
 				A1000034 /* ScheduleViews.swift in Sources */,
 				A1000035 /* MarkdownEditor.swift in Sources */,
+				A1000040 /* SettingsWindow.swift in Sources */,
+				A1000041 /* GeneralSettingsPane.swift in Sources */,
+				A1000042 /* GoalsSettingsPane.swift in Sources */,
+				A1000043 /* ScheduleSettingsPane.swift in Sources */,
+				A1000044 /* ModesSettingsPane.swift in Sources */,
+				A1000045 /* PrayerSettingsPane.swift in Sources */,
+				A1000046 /* AppTimeSettingsPane.swift in Sources */,
+				A1000050 /* Project.swift in Sources */,
+				A1000051 /* ProjectsView.swift in Sources */,
+				A1000052 /* ProjectDetailView.swift in Sources */,
+				A1000053 /* ProjectEditorSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

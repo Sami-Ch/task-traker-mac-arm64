@@ -107,80 +107,40 @@ struct JournalWindowView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            PeriodNavigationHeader(
-                title: presentation.relativeTitle(for: state.selectedDate, logicalToday: dataStore.logicalDate()),
-                subtitle: presentation.dateSubtitle(for: state.selectedDate),
-                onPrevious: { shiftDay(-1) },
-                onNext: { shiftDay(1) }
-            )
+            // Header with date navigation
+            headerView
             
             Divider()
             
-            HStack(spacing: 0) {
-                if !showPreview {
-                    MarkdownToolbar(session: editor)
-                } else {
-                    Text("Preview")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                    Spacer()
-                }
-                
-                Button {
-                    showPreview.toggle()
-                } label: {
-                    Text(showPreview ? "Edit" : "Preview")
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.orange.opacity(0.15)))
-                }
-                .buttonStyle(.plain)
-                .help(showPreview ? "Back to markdown editor" : "Rendered markdown")
-                .padding(.trailing, 8)
-            }
-            .frame(height: 32)
+            // Toolbar area
+            toolbarArea
             
             Divider()
             
+            // Editor/Preview content
             ZStack(alignment: .topLeading) {
                 if showPreview {
                     MarkdownPreview(text: state.draftText)
+                        .transition(.opacity)
                 } else {
                     MarkdownTextEditor(text: $state.draftText, session: editor)
+                        .transition(.opacity)
+                    
+                    // Placeholder
                     if state.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("Write in markdown. Select text, then use the toolbar for bold, highlight, lists…")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 30)
-                            .padding(.top, 24)
-                            .allowsHitTesting(false)
+                        placeholderView
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.easeInOut(duration: 0.15), value: showPreview)
             
             Divider()
             
-            HStack {
-                Text(statusLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Today") {
-                    jumpToToday()
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.blue)
-                .opacity(dataStore.isLogicalToday(state.selectedDate) ? 0.3 : 1)
-                .disabled(dataStore.isLogicalToday(state.selectedDate))
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 32)
+            // Status bar
+            statusBar
         }
-        .frame(minWidth: 480, minHeight: 460)
+        .frame(minWidth: 520, minHeight: 500)
         .background(Color(nsColor: .textBackgroundColor))
         .onAppear {
             state.draftText = dataStore.journalText(for: state.selectedDate)
@@ -195,6 +155,182 @@ struct JournalWindowView: View {
         }
     }
     
+    // MARK: - Header
+    
+    private var headerView: some View {
+        HStack(spacing: 12) {
+            Button {
+                shiftDay(-1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.primary.opacity(0.05)))
+            }
+            .buttonStyle(.plain)
+            
+            VStack(spacing: 2) {
+                Text(presentation.relativeTitle(for: state.selectedDate, logicalToday: dataStore.logicalDate()))
+                    .font(.system(size: 15, weight: .semibold))
+                Text(presentation.dateSubtitle(for: state.selectedDate))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 140)
+            
+            Button {
+                shiftDay(1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.primary.opacity(0.05)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 12)
+    }
+    
+    // MARK: - Toolbar
+    
+    private var toolbarArea: some View {
+        HStack(spacing: 0) {
+            if !showPreview {
+                MarkdownToolbar(session: editor)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 11))
+                    Text("Preview")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                Spacer()
+            }
+            
+            // Mode toggle
+            modeToggle
+        }
+        .frame(height: 40)
+        .background(Color.primary.opacity(0.02))
+    }
+    
+    private var modeToggle: some View {
+        HStack(spacing: 2) {
+            toggleButton("pencil", label: "Edit", isActive: !showPreview) {
+                showPreview = false
+            }
+            toggleButton("eye", label: "Preview", isActive: showPreview) {
+                showPreview = true
+            }
+        }
+        .padding(3)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.trailing, 10)
+    }
+    
+    private func toggleButton(_ icon: String, label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .medium))
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(isActive ? Color.orange.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(isActive ? Color.orange : Color.secondary)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    // MARK: - Placeholder
+    
+    private var placeholderView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("How was this day?")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.tertiary)
+            
+            HStack(spacing: 16) {
+                hintPill("**bold**", icon: "bold")
+                hintPill("*italic*", icon: "italic")
+                hintPill("==highlight==", icon: "highlighter")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.quaternary)
+        }
+        .padding(.horizontal, 32)
+        .padding(.top, 28)
+        .allowsHitTesting(false)
+    }
+    
+    private func hintPill(_ text: String, icon: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+            Text(text)
+                .font(.system(size: 10, design: .monospaced))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.primary.opacity(0.04), in: Capsule())
+    }
+    
+    // MARK: - Status Bar
+    
+    private var statusBar: some View {
+        HStack(spacing: 12) {
+            // Word count
+            HStack(spacing: 4) {
+                Image(systemName: "text.word.spacing")
+                    .font(.system(size: 10))
+                Text(wordCountLabel)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+            
+            Circle()
+                .fill(Color.primary.opacity(0.15))
+                .frame(width: 3, height: 3)
+            
+            // Autosave indicator
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.green.opacity(0.7))
+                Text("Autosaved")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+            
+            Spacer()
+            
+            // Today button
+            Button {
+                jumpToToday()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 10))
+                    Text("Today")
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(dataStore.isLogicalToday(state.selectedDate) ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.blue))
+            }
+            .buttonStyle(.plain)
+            .disabled(dataStore.isLogicalToday(state.selectedDate))
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 32)
+    }
+    
+    // MARK: - Helpers
+    
     private func shiftDay(_ delta: Int) {
         state.selectedDate = presentation.shiftedDay(state.selectedDate, by: delta)
     }
@@ -203,10 +339,9 @@ struct JournalWindowView: View {
         state.selectedDate = dataStore.logicalDate()
     }
     
-    private var statusLabel: String {
+    private var wordCountLabel: String {
         let count = state.draftText.split { $0.isWhitespace || $0.isNewline }.filter { !$0.isEmpty }.count
-        if count == 0 { return "Markdown · autosaves as you type" }
-        return "\(count) word\(count == 1 ? "" : "s") · markdown · autosaved"
+        return "\(count) word\(count == 1 ? "" : "s")"
     }
 }
 
@@ -219,5 +354,5 @@ struct JournalWindowView: View {
 #Preview("Journal Window") {
     JournalWindowView(state: JournalWindowState())
         .environment(DataStore())
-        .frame(width: 520, height: 640)
+        .frame(width: 560, height: 680)
 }
