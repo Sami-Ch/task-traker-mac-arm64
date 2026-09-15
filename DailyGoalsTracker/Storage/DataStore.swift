@@ -11,6 +11,15 @@ final class DataStore {
     var dayRecords: [String: DayRecord] = [:]  // Key: date string
     var dayModes: [DayMode] = []
     var journals: [String: JournalEntry] = [:]  // Key: date string
+    var snapshots: [String: DaySnapshot] = [:]  // Key: date string
+    var settings: TrackerSettings = .default
+    
+    /// Used for Maghrib-based day start. Set from AppDelegate.
+    weak var prayerService: PrayerService?
+    
+    var calendarPresentation: CalendarPresentation {
+        CalendarPresentation(mode: settings.calendarDisplay)
+    }
     
     // MARK: - File Paths
     private let fileManager = FileManager.default
@@ -48,17 +57,31 @@ final class DataStore {
         appSupportURL.appendingPathComponent("journals.json")
     }
     
+    private var snapshotsFileURL: URL {
+        appSupportURL.appendingPathComponent("day_snapshots.json")
+    }
+    
+    private var settingsFileURL: URL {
+        appSupportURL.appendingPathComponent("settings.json")
+    }
+    
+    private var civilCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        return calendar
+    }
+    
     // MARK: - Initialization
     init() {
         loadData()
         
-        // Create sample goals if first launch
         if goals.isEmpty {
             goals = Goal.samples
             saveGoals()
         }
         
         ensureDayModes()
+        ensureDaySnapshotsCurrent()
     }
     
     // MARK: - Data Loading
@@ -69,6 +92,8 @@ final class DataStore {
         loadDayRecords()
         loadDayModes()
         loadJournals()
+        loadSnapshots()
+        loadSettings()
     }
     
     private func loadGoals() {
@@ -119,6 +144,22 @@ final class DataStore {
         journals = Dictionary(uniqueKeysWithValues: decoded.map { ($0.dateString, $0) })
     }
     
+    private func loadSnapshots() {
+        guard let data = try? Data(contentsOf: snapshotsFileURL),
+              let decoded = try? JSONDecoder().decode([DaySnapshot].self, from: data) else {
+            return
+        }
+        snapshots = Dictionary(uniqueKeysWithValues: decoded.map { ($0.dateString, $0) })
+    }
+    
+    private func loadSettings() {
+        guard let data = try? Data(contentsOf: settingsFileURL),
+              let decoded = try? JSONDecoder().decode(TrackerSettings.self, from: data) else {
+            return
+        }
+        settings = decoded
+    }
+    
     /// Seed default modes (and migrate old `isEssential` flags into accepted goal lists).
     private func ensureDayModes() {
         guard dayModes.isEmpty else { return }
@@ -161,6 +202,243 @@ final class DataStore {
         try? data.write(to: journalsFileURL)
     }
     
+    private func saveSnapshots() {
+        let records = Array(snapshots.values)
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        try? data.write(to: snapshotsFileURL)
+    }
+    
+    func saveSettings() {
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        try? data.write(to: settingsFileURL)
+    }
+    
+    func updateSettings(_ mutate: (inout TrackerSettings) -> Void) {
+        mutate(&settings)
+        saveSettings()
+        ensureDaySnapshotsCurrent()
+    }
+    
+    // MARK: - Logical date / freeze
+    
+    /// Civil date that "now" belongs to, using day-start or Maghrib.
+    func logicalDate(for now: Date = Date()) -> Date {
+        computeLogicalDate(now)
+    }
+    
+    func isLogicalToday(_ date: Date, now: Date = Date()) -> Bool {
+        civilCalendar.isDate(date, inSameDayAs: computeLogicalDate(now))
+    }
+    
+    /// Day lists can always be edited, including past snapshots. Freeze only stops the weekly template from rewriting history.
+    func isPlanEditable(on date: Date, now: Date = Date()) -> Bool { true }
+    
+    /// True once this civil date has been snapshotted (template changes no longer rewrite it).
+    func isMembershipFrozen(on date: Date, now: Date = Date()) -> Bool {
+        let key = GoalEntry.dateString(from: date)
+        if snapshots[key]?.frozen == true { return true }
+        let today = computeLogicalDate(now)
+        if civilCalendar.compare(GoalEntry.startOfCivilDay(for: date), to: today, toGranularity: .day) == .orderedAscending {
+            return true
+        }
+        if civilCalendar.isDate(date, inSameDayAs: today) {
+            return now >= dayEndInstant(for: today)
+        }
+        return false
+    }
+    
+    /// Freeze yesterday (and today after day-end). Safe to call often.
+    func ensureDaySnapshotsCurrent(now: Date = Date()) {
+        let today = computeLogicalDate(now)
+        if let yesterday = civilCalendar.date(byAdding: .day, value: -1, to: today) {
+            freezeDayIfNeeded(yesterday, now: now)
+        }
+        freezeDayIfNeeded(today, now: now)
+    }
+    
+    private func computeLogicalDate(_ now: Date) -> Date {
+        let civil = GoalEntry.startOfCivilDay(for: now)
+        
+        if settings.dayStartsAtMaghrib, let maghrib = maghrib(on: civil) {
+            if now >= maghrib {
+                return civilCalendar.date(byAdding: .day, value: 1, to: civil) ?? civil
+            }
+            return civil
+        }
+        
+        let start = timeOnDay(civil, minutes: settings.dayStartMinutes)
+        if now < start {
+            return civilCalendar.date(byAdding: .day, value: -1, to: civil) ?? civil
+        }
+        return civil
+    }
+    
+    private func dayStartInstant(for logicalDate: Date) -> Date {
+        let day = GoalEntry.startOfCivilDay(for: logicalDate)
+        if settings.dayStartsAtMaghrib {
+            let previous = civilCalendar.date(byAdding: .day, value: -1, to: day) ?? day
+            if let maghrib = maghrib(on: previous) {
+                return maghrib
+            }
+        }
+        return timeOnDay(day, minutes: settings.dayStartMinutes)
+    }
+    
+    private func dayEndInstant(for logicalDate: Date) -> Date {
+        let day = GoalEntry.startOfCivilDay(for: logicalDate)
+        if settings.dayStartsAtMaghrib, let maghrib = maghrib(on: day) {
+            return maghrib
+        }
+        var end = timeOnDay(day, minutes: settings.dayEndMinutes)
+        let start = dayStartInstant(for: day)
+        if end <= start {
+            end = civilCalendar.date(byAdding: .day, value: 1, to: end) ?? end
+        }
+        return end
+    }
+    
+    private func timeOnDay(_ day: Date, minutes: Int) -> Date {
+        let clamped = TrackerSettings.clampedMinutes(minutes)
+        return civilCalendar.date(byAdding: .minute, value: clamped, to: GoalEntry.startOfCivilDay(for: day))
+            ?? GoalEntry.startOfCivilDay(for: day)
+    }
+    
+    private func maghrib(on civilDay: Date) -> Date? {
+        prayerService?.maghrib(on: civilDay)
+    }
+    
+    private func freezeDayIfNeeded(_ date: Date, now: Date) {
+        let day = GoalEntry.startOfCivilDay(for: date)
+        let key = GoalEntry.dateString(from: day)
+        if snapshots[key]?.frozen == true { return }
+        
+        let today = computeLogicalDate(now)
+        let isPast = civilCalendar.compare(day, to: today, toGranularity: .day) == .orderedAscending
+        let isTodayPastEnd = civilCalendar.isDate(day, inSameDayAs: today) && now >= dayEndInstant(for: day)
+        guard isPast || isTodayPastEnd else { return }
+        
+        freezeDay(day)
+    }
+    
+    private func freezeDay(_ date: Date) {
+        let day = GoalEntry.startOfCivilDay(for: date)
+        let key = GoalEntry.dateString(from: day)
+        if snapshots[key]?.frozen == true { return }
+        
+        var snap = snapshots[key] ?? DaySnapshot(
+            dateString: key,
+            modeId: getDayRecord(for: day).modeId
+        )
+        let tracked = liveGoalsForDay(day).tracked
+        snap.items = tracked.enumerated().map { index, goal in
+            SnapshotItem(
+                goalId: goal.id,
+                title: goal.title,
+                icon: goal.icon,
+                order: index,
+                isOverride: snap.extraSet.contains(goal.id) || snap.oneOffItems.contains { $0.goalId == goal.id },
+                isOneOff: snap.oneOffItems.contains { $0.goalId == goal.id }
+            )
+        }
+        snap.frozen = true
+        snap.modeId = getDayRecord(for: day).modeId
+        snap.oneOffItems = []
+        snapshots[key] = snap
+        saveSnapshots()
+    }
+    
+    private func liveSnapshot(for date: Date) -> DaySnapshot {
+        let key = GoalEntry.dateString(from: date)
+        return snapshots[key] ?? DaySnapshot(
+            dateString: key,
+            modeId: getDayRecord(for: date).modeId
+        )
+    }
+    
+    private func mutateSnapshot(for date: Date, _ body: (inout DaySnapshot) -> Void) {
+        let key = GoalEntry.dateString(from: date)
+        var snap = liveSnapshot(for: date)
+        body(&snap)
+        snapshots[key] = snap
+        saveSnapshots()
+    }
+    
+    func hideGoal(_ goalId: UUID, on date: Date) {
+        mutateSnapshot(for: date) { snap in
+            if snap.frozen {
+                snap.items.removeAll { $0.goalId == goalId }
+                Self.reindex(&snap.items)
+            } else if snap.oneOffItems.contains(where: { $0.goalId == goalId }) {
+                snap.oneOffItems.removeAll { $0.goalId == goalId }
+            } else {
+                snap.extraGoalIds.removeAll { $0 == goalId }
+                if !snap.hiddenGoalIds.contains(goalId) {
+                    snap.hiddenGoalIds.append(goalId)
+                }
+            }
+        }
+    }
+    
+    func addGoalOverride(_ goalId: UUID, on date: Date) {
+        guard let goal = goals.first(where: { $0.id == goalId }) else { return }
+        mutateSnapshot(for: date) { snap in
+            snap.hiddenGoalIds.removeAll { $0 == goalId }
+            if snap.frozen {
+                guard !snap.items.contains(where: { $0.goalId == goalId }) else { return }
+                snap.items.append(
+                    SnapshotItem(
+                        goalId: goal.id,
+                        title: goal.title,
+                        icon: goal.icon,
+                        order: snap.items.count,
+                        isOverride: true
+                    )
+                )
+            } else if !snap.extraGoalIds.contains(goalId) {
+                snap.extraGoalIds.append(goalId)
+            }
+        }
+    }
+    
+    func addOneOffTask(title: String, icon: String, on date: Date) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        mutateSnapshot(for: date) { snap in
+            let item = SnapshotItem(
+                goalId: UUID(),
+                title: trimmed,
+                icon: icon,
+                order: snap.frozen ? snap.items.count : snap.oneOffItems.count,
+                isOverride: true,
+                isOneOff: true
+            )
+            if snap.frozen {
+                snap.items.append(item)
+            } else {
+                snap.oneOffItems.append(item)
+            }
+        }
+    }
+    
+    func isOneOff(_ goalId: UUID, on date: Date) -> Bool {
+        let snap = snapshots[GoalEntry.dateString(from: date)]
+        if let snap, snap.frozen {
+            return snap.items.first(where: { $0.goalId == goalId })?.isOneOff == true
+        }
+        return snap?.oneOffItems.contains(where: { $0.goalId == goalId }) == true
+    }
+    
+    func goalsAvailableToAdd(on date: Date) -> [Goal] {
+        let trackedIds = Set(goalsForDay(date).tracked.map(\.id))
+        return goals.filter { $0.isActive && !trackedIds.contains($0.id) }
+    }
+    
+    private static func reindex(_ items: inout [SnapshotItem]) {
+        for index in items.indices {
+            items[index].order = index
+        }
+    }
+    
     // MARK: - Goal Management
     func addGoal(_ goal: Goal) {
         var newGoal = goal
@@ -176,18 +454,41 @@ final class DataStore {
         }
     }
     
+    func setWeekdays(_ weekdays: WeekdaySet, for goalId: UUID) {
+        guard let index = goals.firstIndex(where: { $0.id == goalId }) else { return }
+        goals[index].weekdays = weekdays.isEmpty ? goals[index].weekdays : weekdays
+        saveGoals()
+    }
+    
+    func toggleWeekday(_ weekday: WeekdaySet, for goalId: UUID) {
+        guard let index = goals.firstIndex(where: { $0.id == goalId }) else { return }
+        var next = goals[index].weekdays
+        if next.contains(weekday) {
+            next.remove(weekday)
+            if next.isEmpty { return }
+        } else {
+            next.insert(weekday)
+        }
+        goals[index].weekdays = next
+        saveGoals()
+    }
+    
     func deleteGoal(_ goal: Goal) {
         goals.removeAll { $0.id == goal.id }
         for (index, _) in goals.enumerated() {
             goals[index].order = index
         }
-        entries = entries.filter { !$0.key.hasPrefix(goal.id.uuidString) }
         for i in dayModes.indices {
             dayModes[i].acceptedGoalIds.removeAll { $0 == goal.id }
         }
+        for key in snapshots.keys {
+            guard snapshots[key]?.frozen != true else { continue }
+            snapshots[key]?.hiddenGoalIds.removeAll { $0 == goal.id }
+            snapshots[key]?.extraGoalIds.removeAll { $0 == goal.id }
+        }
         saveGoals()
-        saveEntries()
         saveDayModes()
+        saveSnapshots()
     }
     
     func moveGoal(from source: IndexSet, to destination: Int) {
@@ -252,7 +553,11 @@ final class DataStore {
     }
     
     func mode(for date: Date) -> DayMode {
-        mode(for: getDayRecord(for: date).modeId)
+        let key = GoalEntry.dateString(from: date)
+        if let snap = snapshots[key], snap.frozen {
+            return mode(for: snap.modeId)
+        }
+        return mode(for: getDayRecord(for: date).modeId)
     }
     
     func addDayMode(_ mode: DayMode) {
@@ -327,6 +632,11 @@ final class DataStore {
             if let note { record.note = note }
             dayRecords[key] = record
         }
+        if var snap = snapshots[key] {
+            snap.modeId = resolved.id
+            snapshots[key] = snap
+            saveSnapshots()
+        }
         saveDayRecords()
     }
     
@@ -358,18 +668,48 @@ final class DataStore {
         }
     }
     
-    /// Goals that apply on a given day (respects each mode's accepted goal list).
+    /// Goals that apply on a given day (template + mode + overrides, or frozen snapshot).
     func goalsForDay(_ date: Date) -> (tracked: [Goal], skipped: [Goal]) {
-        let active = goals.filter(\.isActive)
-        let dayMode = mode(for: date)
+        let key = GoalEntry.dateString(from: date)
+        if let snap = snapshots[key], snap.frozen {
+            let tracked = snap.items.sorted { $0.order < $1.order }.map { $0.asGoal() }
+            return (tracked, [])
+        }
+        return liveGoalsForDay(date)
+    }
+    
+    private func liveGoalsForDay(_ date: Date) -> (tracked: [Goal], skipped: [Goal]) {
+        let weekday = WeekdaySet.forDate(date, calendar: civilCalendar)
+        let eligible = goals.filter { $0.isActive && $0.weekdays.contains(weekday) }
+        let snap = snapshots[GoalEntry.dateString(from: date)]
+        let hidden = snap?.hiddenSet ?? []
+        let extraIds = snap?.extraGoalIds ?? []
+        let dayMode = mode(for: getDayRecord(for: date).modeId)
         
+        var tracked: [Goal]
         if dayMode.tracksAllGoals {
-            return (active, [])
+            tracked = eligible.filter { !hidden.contains($0.id) }
+        } else {
+            let accepted = Set(dayMode.acceptedGoalIds)
+            tracked = eligible.filter { accepted.contains($0.id) && !hidden.contains($0.id) }
         }
         
-        let accepted = Set(dayMode.acceptedGoalIds)
-        let tracked = active.filter { accepted.contains($0.id) }
-        let skipped = active.filter { !accepted.contains($0.id) }
+        for extraId in extraIds {
+            guard !tracked.contains(where: { $0.id == extraId }),
+                  let extra = goals.first(where: { $0.id == extraId && $0.isActive })
+            else { continue }
+            tracked.append(extra)
+        }
+        
+        if let oneOffs = snap?.oneOffItems {
+            for item in oneOffs where !tracked.contains(where: { $0.id == item.goalId }) {
+                tracked.append(item.asGoal())
+            }
+        }
+        
+        tracked.sort { $0.order < $1.order }
+        let trackedIds = Set(tracked.map(\.id))
+        let skipped = eligible.filter { !trackedIds.contains($0.id) }.sorted { $0.order < $1.order }
         return (tracked, skipped)
     }
     
@@ -388,14 +728,11 @@ final class DataStore {
     }
     
     func getWeekEntries(for date: Date) -> [[GoalEntry]] {
-        let calendar = Calendar.current
-        let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date))!
+        let dates = calendarPresentation.weekDates(containing: date)
         
-        return goals.filter { $0.isActive }.map { goal in
-            (0..<7).map { dayOffset in
-                let day = calendar.date(byAdding: .day, value: dayOffset, to: weekStart)!
-                let (tracked, _) = goalsForDay(day)
-                if tracked.contains(where: { $0.id == goal.id }) {
+        return goalsForWeek(dates).map { goal in
+            dates.map { day in
+                if isGoalTracked(goal, on: day) {
                     return getEntry(for: goal.id, on: day)
                 }
                 return GoalEntry(goalId: goal.id, date: day, status: .notDone)
@@ -403,29 +740,40 @@ final class DataStore {
         }
     }
     
+    func goalsForWeek(_ dates: [Date]) -> [Goal] {
+        var ordered: [Goal] = []
+        var seen = Set<UUID>()
+        for date in dates {
+            for goal in goalsForDay(date).tracked where seen.insert(goal.id).inserted {
+                ordered.append(goal)
+            }
+        }
+        return ordered
+    }
+    
     /// Whether a goal counts on a specific day (for week grid styling).
     func isGoalTracked(_ goal: Goal, on date: Date) -> Bool {
         goalsForDay(date).tracked.contains { $0.id == goal.id }
     }
     
-    func getMonthEntries(for date: Date) -> [Date: DailySummary] {
-        let calendar = Calendar.current
-        let range = calendar.range(of: .day, in: .month, for: date)!
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
-        
+    func getMonthEntries(for dates: [Date]) -> [Date: DailySummary] {
         var summaries: [Date: DailySummary] = [:]
-        for day in range {
-            let dayDate = calendar.date(byAdding: .day, value: day - 1, to: monthStart)!
-            summaries[dayDate] = getDailySummary(for: dayDate)
+        for date in dates {
+            let key = GoalEntry.startOfCivilDay(for: date)
+            summaries[key] = getDailySummary(for: key)
         }
         return summaries
     }
     
+    func getMonthEntries(for date: Date) -> [Date: DailySummary] {
+        let days = calendarPresentation.monthDayDates(containing: date)
+        return getMonthEntries(for: days)
+    }
+    
     /// Streak: consecutive days meeting tracked goal target for that day's mode.
     func getCurrentStreak() -> Int {
-        let calendar = Calendar.current
         var streak = 0
-        var currentDate = calendar.startOfDay(for: Date())
+        var currentDate = computeLogicalDate(Date())
         
         while true {
             let summary = getDailySummary(for: currentDate)
@@ -437,7 +785,7 @@ final class DataStore {
             }
             if met {
                 streak += 1
-                currentDate = calendar.date(byAdding: .day, value: -1, to: currentDate)!
+                currentDate = civilCalendar.date(byAdding: .day, value: -1, to: currentDate)!
             } else {
                 break
             }

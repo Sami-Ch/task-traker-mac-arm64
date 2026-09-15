@@ -98,38 +98,65 @@ struct JournalWindowView: View {
     @Environment(DataStore.self) private var dataStore
     @Bindable var state: JournalWindowState
     
-    @FocusState private var isEditorFocused: Bool
+    @State private var editor = MarkdownEditingSession()
+    @State private var showPreview = false
+    
+    private var presentation: CalendarPresentation {
+        dataStore.calendarPresentation
+    }
     
     var body: some View {
         VStack(spacing: 0) {
             PeriodNavigationHeader(
-                title: dateTitle,
-                subtitle: fullDate,
-                onPrevious: {
-                    shiftDay(-1)
-                },
-                onNext: {
-                    shiftDay(1)
-                }
+                title: presentation.relativeTitle(for: state.selectedDate, logicalToday: dataStore.logicalDate()),
+                subtitle: presentation.dateSubtitle(for: state.selectedDate),
+                onPrevious: { shiftDay(-1) },
+                onNext: { shiftDay(1) }
             )
             
             Divider()
             
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $state.draftText)
-                    .font(.system(size: 16, weight: .regular))
-                    .scrollContentBackground(.hidden)
-                    .focusEffectDisabled()
-                    .padding(16)
-                    .focused($isEditorFocused)
+            HStack(spacing: 0) {
+                if !showPreview {
+                    MarkdownToolbar(session: editor)
+                } else {
+                    Text("Preview")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                    Spacer()
+                }
                 
-                if state.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("How was this day?")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 21)
-                        .padding(.top, 24)
-                        .allowsHitTesting(false)
+                Button {
+                    showPreview.toggle()
+                } label: {
+                    Text(showPreview ? "Edit" : "Preview")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.orange.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+                .help(showPreview ? "Back to markdown editor" : "Rendered markdown")
+                .padding(.trailing, 8)
+            }
+            .frame(height: 32)
+            
+            Divider()
+            
+            ZStack(alignment: .topLeading) {
+                if showPreview {
+                    MarkdownPreview(text: state.draftText)
+                } else {
+                    MarkdownTextEditor(text: $state.draftText, session: editor)
+                    if state.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Write in markdown. Select text, then use the toolbar for bold, highlight, lists…")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 30)
+                            .padding(.top, 24)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -147,60 +174,39 @@ struct JournalWindowView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.blue)
-                .opacity(isToday ? 0.3 : 1)
-                .disabled(isToday)
+                .opacity(dataStore.isLogicalToday(state.selectedDate) ? 0.3 : 1)
+                .disabled(dataStore.isLogicalToday(state.selectedDate))
             }
             .padding(.horizontal, 16)
             .frame(height: 32)
         }
-        .frame(minWidth: 420, minHeight: 420)
+        .frame(minWidth: 480, minHeight: 460)
         .background(Color(nsColor: .textBackgroundColor))
         .onAppear {
             state.draftText = dataStore.journalText(for: state.selectedDate)
-            isEditorFocused = true
         }
         .onChange(of: state.selectedDate) { oldDate, newDate in
             dataStore.setJournal(state.draftText, for: oldDate)
             state.draftText = dataStore.journalText(for: newDate)
-            isEditorFocused = true
+            showPreview = false
         }
         .onChange(of: state.draftText) { _, newValue in
             dataStore.setJournal(newValue, for: state.selectedDate)
         }
     }
     
-    private var isToday: Bool {
-        Calendar.current.isDateInToday(state.selectedDate)
+    private func shiftDay(_ delta: Int) {
+        state.selectedDate = presentation.shiftedDay(state.selectedDate, by: delta)
     }
     
-    private var dateTitle: String {
-        if isToday { return "Today" }
-        if Calendar.current.isDateInYesterday(state.selectedDate) { return "Yesterday" }
-        if Calendar.current.isDateInTomorrow(state.selectedDate) { return "Tomorrow" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE"
-        return formatter.string(from: state.selectedDate)
-    }
-    
-    private var fullDate: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
-        return formatter.string(from: state.selectedDate)
+    private func jumpToToday() {
+        state.selectedDate = dataStore.logicalDate()
     }
     
     private var statusLabel: String {
         let count = state.draftText.split { $0.isWhitespace || $0.isNewline }.filter { !$0.isEmpty }.count
-        if count == 0 { return "Autosaves as you type" }
-        return "\(count) word\(count == 1 ? "" : "s") · autosaved"
-    }
-    
-    private func shiftDay(_ delta: Int) {
-        let base = Calendar.current.startOfDay(for: state.selectedDate)
-        state.selectedDate = Calendar.current.date(byAdding: .day, value: delta, to: base) ?? state.selectedDate
-    }
-    
-    private func jumpToToday() {
-        state.selectedDate = Calendar.current.startOfDay(for: Date())
+        if count == 0 { return "Markdown · autosaves as you type" }
+        return "\(count) word\(count == 1 ? "" : "s") · markdown · autosaved"
     }
 }
 

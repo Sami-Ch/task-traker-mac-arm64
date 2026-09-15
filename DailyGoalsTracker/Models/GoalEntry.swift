@@ -15,15 +15,25 @@ struct GoalEntry: Identifiable, Codable, Equatable {
     
     init(goalId: UUID, date: Date, status: GoalStatus = .notDone, note: String? = nil) {
         self.goalId = goalId
-        self.date = Calendar.current.startOfDay(for: date)
+        self.date = Self.startOfCivilDay(for: date)
         self.status = status
         self.note = note
     }
     
     // MARK: - Date Formatting
     
+    /// Persistence keys stay Gregorian even when the UI shows Hijri.
+    static func startOfCivilDay(for date: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        return calendar.startOfDay(for: date)
+    }
+    
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()

@@ -49,6 +49,7 @@ struct DayModePicker: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .disabled(false)
     }
     
     private var specialDayBanner: some View {

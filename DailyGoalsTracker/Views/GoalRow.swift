@@ -5,6 +5,7 @@ struct GoalRow: View {
     let goal: Goal
     let entry: GoalEntry
     var showsEssentialBadge: Bool = false
+    var isOneOff: Bool = false
     let onStatusChange: () -> Void
     
     @State private var isHovered = false
@@ -17,6 +18,12 @@ struct GoalRow: View {
                 Text(goal.title)
                     .font(.system(size: 14, weight: .medium))
                     .lineLimit(1)
+                if isOneOff {
+                    Image(systemName: "1.circle")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.blue)
+                        .help("One-off task for this day only")
+                }
                 if showsEssentialBadge {
                     Image(systemName: "star.fill")
                         .font(.system(size: 8))

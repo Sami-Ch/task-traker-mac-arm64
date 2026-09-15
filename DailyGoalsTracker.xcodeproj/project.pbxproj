@@ -33,6 +33,15 @@
 		A1000024 /* PrayerViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026; };
 		A1000025 /* JournalEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027; };
 		A1000026 /* JournalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028; };
+		A1000027 /* AppTimeLimit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000029; };
+		A1000028 /* AppUsageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030; };
+		A1000029 /* AppTimeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031; };
+		A1000030 /* WeekdaySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000032; };
+		A1000031 /* DaySnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000033; };
+		A1000032 /* TrackerSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000034; };
+		A1000033 /* CalendarPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000035; };
+		A1000034 /* ScheduleViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036; };
+		A1000035 /* MarkdownEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +73,15 @@
 		A2000026 /* PrayerViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrayerViews.swift; sourceTree = "<group>"; };
 		A2000027 /* JournalEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEntry.swift; sourceTree = "<group>"; };
 		A2000028 /* JournalViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalViews.swift; sourceTree = "<group>"; };
+		A2000029 /* AppTimeLimit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTimeLimit.swift; sourceTree = "<group>"; };
+		A2000030 /* AppUsageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUsageService.swift; sourceTree = "<group>"; };
+		A2000031 /* AppTimeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTimeViews.swift; sourceTree = "<group>"; };
+		A2000032 /* WeekdaySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekdaySet.swift; sourceTree = "<group>"; };
+		A2000033 /* DaySnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaySnapshot.swift; sourceTree = "<group>"; };
+		A2000034 /* TrackerSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackerSettings.swift; sourceTree = "<group>"; };
+		A2000035 /* CalendarPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarPresentation.swift; sourceTree = "<group>"; };
+		A2000036 /* ScheduleViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleViews.swift; sourceTree = "<group>"; };
+		A2000037 /* MarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditor.swift; sourceTree = "<group>"; };
 		A3000001 /* DailyGoalsTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyGoalsTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -113,6 +131,11 @@
 				A2000022 /* DayMode.swift */,
 				A2000024 /* PrayerModels.swift */,
 				A2000027 /* JournalEntry.swift */,
+				A2000029 /* AppTimeLimit.swift */,
+				A2000032 /* WeekdaySet.swift */,
+				A2000033 /* DaySnapshot.swift */,
+				A2000034 /* TrackerSettings.swift */,
+				A2000035 /* CalendarPresentation.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -129,6 +152,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000025 /* PrayerService.swift */,
+				A2000030 /* AppUsageService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -149,6 +173,9 @@
 				A2000023 /* DayModePicker.swift */,
 				A2000026 /* PrayerViews.swift */,
 				A2000028 /* JournalViews.swift */,
+				A2000031 /* AppTimeViews.swift */,
+				A2000036 /* ScheduleViews.swift */,
+				A2000037 /* MarkdownEditor.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -263,6 +290,15 @@
 				A1000024 /* PrayerViews.swift in Sources */,
 				A1000025 /* JournalEntry.swift in Sources */,
 				A1000026 /* JournalViews.swift in Sources */,
+				A1000027 /* AppTimeLimit.swift in Sources */,
+				A1000028 /* AppUsageService.swift in Sources */,
+				A1000029 /* AppTimeViews.swift in Sources */,
+				A1000030 /* WeekdaySet.swift in Sources */,
+				A1000031 /* DaySnapshot.swift in Sources */,
+				A1000032 /* TrackerSettings.swift in Sources */,
+				A1000033 /* CalendarPresentation.swift in Sources */,
+				A1000034 /* ScheduleViews.swift in Sources */,
+				A1000035 /* MarkdownEditor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

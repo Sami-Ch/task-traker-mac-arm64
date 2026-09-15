@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Carbon.HIToolbox
+import UserNotifications
 
 extension Notification.Name {
     static let resetPopoverToToday = Notification.Name("resetPopoverToToday")
@@ -14,16 +15,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var hotKeyRef: EventHotKeyRef?
     private var journalWindow: NSWindow?
     
+    private var freezeTimer: Timer?
+    
     let dataStore = DataStore()
     let prayerService = PrayerService()
+    let appUsageService = AppUsageService()
     let journalState = JournalWindowState()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
         setupStatusItem()
         setupPopover()
         setupEventMonitor()
         setupGlobalHotKey()
+        dataStore.prayerService = prayerService
         prayerService.bootstrap()
+        appUsageService.bootstrap()
+        dataStore.ensureDaySnapshotsCurrent()
+        startFreezeTimer()
     }
     
     // MARK: - Status Item Setup
@@ -52,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let contentView = PopoverView()
             .environment(dataStore)
             .environment(prayerService)
+            .environment(appUsageService)
             .environment(\.openJournal, OpenJournalAction { [weak self] date in
                 self?.showJournalWindow(for: date)
             })
@@ -119,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let menu = NSMenu()
         
         // Quick status for today
-        let summary = dataStore.getDailySummary(for: Date())
+        let summary = dataStore.getDailySummary(for: dataStore.logicalDate())
         let summaryMenuItem = NSMenuItem(title: "Today: \(summary.doneCount)/\(summary.totalGoals) completed", action: nil, keyEquivalent: "")
         summaryMenuItem.isEnabled = false
         menu.addItem(summaryMenuItem)
@@ -149,11 +159,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     
     @objc func openJournalFromMenu() {
-        showJournalWindow(for: Date())
+        showJournalWindow(for: dataStore.logicalDate())
     }
     
     func showJournalWindow(for date: Date) {
-        journalState.selectedDate = Calendar.current.startOfDay(for: date)
+        journalState.selectedDate = GoalEntry.startOfCivilDay(for: date)
         
         if journalWindow == nil {
             let content = JournalWindowView(state: journalState)
@@ -162,8 +172,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             let window = NSWindow(contentViewController: hosting)
             window.title = "Journal"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.setContentSize(NSSize(width: 520, height: 640))
-            window.minSize = NSSize(width: 420, height: 420)
+            window.setContentSize(NSSize(width: 560, height: 680))
+            window.minSize = NSSize(width: 480, height: 460)
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()
@@ -176,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        appUsageService.recordOpen()
         
         if let window = journalWindow {
             if window.isMiniaturized {
@@ -189,9 +200,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         NSApp.terminate(nil)
     }
     
+    private func startFreezeTimer() {
+        freezeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.dataStore.ensureDaySnapshotsCurrent()
+        }
+        freezeTimer?.tolerance = 10
+    }
+    
     // MARK: - Cleanup
     func applicationWillTerminate(_ notification: Notification) {
         dataStore.setJournal(journalState.draftText, for: journalState.selectedDate)
+        appUsageService.persist()
+        freezeTimer?.invalidate()
         if let eventMonitor = eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
@@ -202,9 +222,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     
     // MARK: - NSPopoverDelegate
     func popoverWillShow(_ notification: Notification) {
+        dataStore.ensureDaySnapshotsCurrent()
         NotificationCenter.default.post(name: .resetPopoverToToday, object: nil)
+        appUsageService.recordOpen()
         Task {
             await prayerService.refresh()
+            dataStore.ensureDaySnapshotsCurrent()
         }
     }
     
@@ -216,5 +239,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         guard (notification.object as? NSWindow) === journalWindow else { return }
         dataStore.setJournal(journalState.draftText, for: journalState.selectedDate)
         NSApp.setActivationPolicy(.accessory)
+    }
+}
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.actionIdentifier == AppUsageService.snoozeActionId {
+            appUsageService.snoozeReminders()
+        }
+        completionHandler()
+    }
+    
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
     }
 }

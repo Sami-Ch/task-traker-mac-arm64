@@ -117,7 +117,7 @@ struct DayRecord: Identifiable, Codable, Equatable {
     }
     
     init(date: Date, modeId: String = DayMode.normalId, note: String? = nil) {
-        self.date = Calendar.current.startOfDay(for: date)
+        self.date = GoalEntry.startOfCivilDay(for: date)
         self.modeId = modeId
         self.note = note
     }

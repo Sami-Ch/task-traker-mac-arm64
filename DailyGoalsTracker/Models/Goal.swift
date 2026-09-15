@@ -8,14 +8,24 @@ struct Goal: Identifiable, Codable, Equatable, Hashable {
     var order: Int
     var isActive: Bool
     var isEssential: Bool
+    var weekdays: WeekdaySet
     
-    init(id: UUID = UUID(), title: String, icon: String = "star.fill", order: Int = 0, isActive: Bool = true, isEssential: Bool = false) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        icon: String = "star.fill",
+        order: Int = 0,
+        isActive: Bool = true,
+        isEssential: Bool = false,
+        weekdays: WeekdaySet = .all
+    ) {
         self.id = id
         self.title = title
         self.icon = icon
         self.order = order
         self.isActive = isActive
         self.isEssential = isEssential
+        self.weekdays = weekdays
     }
     
     init(from decoder: Decoder) throws {
@@ -26,6 +36,7 @@ struct Goal: Identifiable, Codable, Equatable, Hashable {
         order = try c.decode(Int.self, forKey: .order)
         isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
         isEssential = try c.decodeIfPresent(Bool.self, forKey: .isEssential) ?? false
+        weekdays = try c.decodeIfPresent(WeekdaySet.self, forKey: .weekdays) ?? .all
     }
 }
 

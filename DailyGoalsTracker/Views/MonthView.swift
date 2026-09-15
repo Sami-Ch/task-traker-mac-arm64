@@ -6,34 +6,14 @@ struct MonthView: View {
     @Binding var selectedDate: Date
     var onDayTap: ((Date) -> Void)?
     
-    private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
     
-    private var monthStart: Date {
-        calendar.date(from: calendar.dateComponents([.year, .month], from: selectedDate))!
+    private var presentation: CalendarPresentation {
+        dataStore.calendarPresentation
     }
     
     private var daysInMonth: [Date?] {
-        let range = calendar.range(of: .day, in: .month, for: monthStart)!
-        let firstWeekday = calendar.component(.weekday, from: monthStart)
-        
-        // Adjust for week starting on Monday (weekday 2)
-        let leadingEmptyDays = (firstWeekday + 5) % 7
-        
-        var days: [Date?] = Array(repeating: nil, count: leadingEmptyDays)
-        
-        for day in range {
-            if let date = calendar.date(byAdding: .day, value: day - 1, to: monthStart) {
-                days.append(date)
-            }
-        }
-        
-        // Pad to complete last week
-        while days.count % 7 != 0 {
-            days.append(nil)
-        }
-        
-        return days
+        presentation.monthGridDays(containing: selectedDate)
     }
     
     private var monthSummaries: [Date: DailySummary] {
@@ -50,13 +30,13 @@ struct MonthView: View {
     var body: some View {
         VStack(spacing: 0) {
             PeriodNavigationHeader(
-                title: monthTitle,
+                title: presentation.monthTitle(for: selectedDate),
                 subtitle: nil,
                 onPrevious: {
-                    selectedDate = calendar.date(byAdding: .month, value: -1, to: selectedDate) ?? selectedDate
+                    selectedDate = presentation.shiftedMonth(selectedDate, by: -1)
                 },
                 onNext: {
-                    selectedDate = calendar.date(byAdding: .month, value: 1, to: selectedDate) ?? selectedDate
+                    selectedDate = presentation.shiftedMonth(selectedDate, by: 1)
                 }
             )
             
@@ -83,55 +63,50 @@ struct MonthView: View {
         }
     }
     
-    // MARK: - Month Header (removed - using PeriodNavigationHeader)
-    
-    private var monthTitle: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM yyyy"
-        return formatter.string(from: selectedDate)
-    }
-    
     private var perfectDaysCount: Int {
         monthSummaries.values.filter { $0.completionPercentage >= 1.0 }.count
     }
     
-    // MARK: - Weekday Headers
     private var weekdayHeaders: some View {
         HStack(spacing: 4) {
-            ForEach(Array(["M", "T", "W", "T", "F", "S", "S"].enumerated()), id: \.offset) { _, day in
-                Text(day)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.tertiary)
+            ForEach(Array(presentation.weekDates(containing: selectedDate).enumerated()), id: \.offset) { _, date in
+                let jumuah = presentation.isJumuah(date)
+                Text(presentation.weekdayHeaderLetter(for: date))
+                    .font(.system(size: 9, weight: jumuah ? .semibold : .medium))
+                    .foregroundStyle(jumuah && dataStore.settings.calendarDisplay.usesIslamicWeek ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
                     .frame(maxWidth: .infinity)
+                    .help(presentation.weekdayName(for: date, style: .full))
             }
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 2)
     }
     
-    // MARK: - Calendar Grid
     private var calendarGrid: some View {
         LazyVGrid(columns: columns, spacing: 4) {
             ForEach(Array(daysInMonth.enumerated()), id: \.offset) { _, date in
                 if let date = date {
+                    let civil = GoalEntry.startOfCivilDay(for: date)
                     CalendarDayCell(
                         date: date,
-                        summary: monthSummaries[date],
-                        isToday: calendar.isDateInToday(date),
-                        isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
+                        dayLabel: presentation.dayNumber(for: date),
+                        secondaryLabel: presentation.secondaryDayNumber(for: date),
+                        summary: monthSummaries[civil],
+                        isToday: dataStore.isLogicalToday(date),
+                        isSelected: Calendar.current.isDate(date, inSameDayAs: selectedDate),
+                        isJumuah: presentation.isJumuah(date) && dataStore.settings.calendarDisplay.usesIslamicWeek,
                         hasJournal: dataStore.hasJournal(on: date)
                     ) {
                         onDayTap?(date)
                     }
                 } else {
                     Color.clear
-                        .frame(height: 32)
+                        .frame(height: 36)
                 }
             }
         }
     }
     
-    // MARK: - Legend
     private var legend: some View {
         HStack(spacing: 16) {
             legendItem(color: .gray.opacity(0.2), label: "0%")
@@ -157,9 +132,12 @@ struct MonthView: View {
 // MARK: - Calendar Day Cell
 private struct CalendarDayCell: View {
     let date: Date
+    let dayLabel: String
+    var secondaryLabel: String? = nil
     let summary: DailySummary?
     let isToday: Bool
     let isSelected: Bool
+    var isJumuah: Bool = false
     var hasJournal: Bool = false
     let action: () -> Void
     
@@ -187,10 +165,17 @@ private struct CalendarDayCell: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(backgroundColor)
                 
-                Text(dayNumber)
-                    .font(.system(size: 12, weight: isToday ? .bold : .regular))
-                    .foregroundStyle(isToday ? .blue : .primary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 0) {
+                    Text(dayLabel)
+                        .font(.system(size: 12, weight: isToday ? .bold : .regular))
+                        .foregroundStyle(isToday ? .blue : (isJumuah ? .green : .primary))
+                    if let secondaryLabel {
+                        Text(secondaryLabel)
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 
                 if summary?.isSpecialDay == true {
                     Image(systemName: summary?.dayMode.icon ?? "leaf.fill")
@@ -212,19 +197,17 @@ private struct CalendarDayCell: View {
                         .strokeBorder(Color.blue, lineWidth: 2)
                 }
             }
-            .frame(height: 32)
+            .frame(height: 36)
         }
         .buttonStyle(.plain)
+        .help(dayHelp)
     }
     
-    private var dayNumber: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d"
-        return formatter.string(from: date)
+    private var dayHelp: String {
+        GoalEntry.dateString(from: date)
     }
 }
 
-// MARK: - Preview
 #Preview("Month View") {
     MonthView(selectedDate: .constant(Date()))
         .environment(DataStore())

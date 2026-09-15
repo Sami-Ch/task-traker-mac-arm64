@@ -58,6 +58,8 @@ final class PrayerService: NSObject {
         static let notifyBefore = "prayer.notifyBefore"
         static let lastLat = "prayer.lastLat"
         static let lastLon = "prayer.lastLon"
+        static let lastMaghribHour = "prayer.lastMaghribHour"
+        static let lastMaghribMinute = "prayer.lastMaghribMinute"
     }
     
     override init() {
@@ -83,6 +85,33 @@ final class PrayerService: NSObject {
     
     var nextPrayer: PrayerTiming? {
         schedule?.nextPrayer()
+    }
+    
+    /// Maghrib on a civil date. Uses today's fetched time, else last known hour:minute.
+    func maghrib(on date: Date) -> Date? {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: date)
+        if let schedule,
+           calendar.isDate(schedule.date, inSameDayAs: date),
+           let maghrib = schedule.timings.first(where: { $0.name == .maghrib }) {
+            return maghrib.date
+        }
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: Keys.lastMaghribHour) != nil else { return nil }
+        let hour = defaults.integer(forKey: Keys.lastMaghribHour)
+        let minute = defaults.integer(forKey: Keys.lastMaghribMinute)
+        return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: dayStart)
+    }
+    
+    private func rememberMaghrib(from schedule: PrayerDaySchedule) {
+        guard let maghrib = schedule.timings.first(where: { $0.name == .maghrib }) else { return }
+        let components = Calendar.current.dateComponents([.hour, .minute], from: maghrib.date)
+        if let hour = components.hour {
+            UserDefaults.standard.set(hour, forKey: Keys.lastMaghribHour)
+        }
+        if let minute = components.minute {
+            UserDefaults.standard.set(minute, forKey: Keys.lastMaghribMinute)
+        }
     }
     
     func bootstrap() {
@@ -117,6 +146,7 @@ final class PrayerService: NSObject {
                 school: school
             )
             schedule = day
+            rememberMaghrib(from: day)
             rescheduleNotifications()
             statusMessage = nil
         } catch {
@@ -130,6 +160,7 @@ final class PrayerService: NSObject {
                         school: school
                     )
                     schedule = day
+                    rememberMaghrib(from: day)
                     rescheduleNotifications()
                     statusMessage = "Using last known location"
                 } catch {

@@ -15,11 +15,11 @@ struct JournalEntry: Identifiable, Codable, Equatable {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     
-    /// First couple of non-empty lines, collapsed for the popover card.
+    /// First couple of non-empty lines, markdown markers stripped for the popover card.
     var preview: String {
         let lines = text
             .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { JournalMarkdown.plainText(from: String($0)).trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         return lines.prefix(2).joined(separator: " ")
     }
@@ -29,7 +29,7 @@ struct JournalEntry: Identifiable, Codable, Equatable {
     }
     
     init(date: Date, text: String, updatedAt: Date = Date()) {
-        self.date = Calendar.current.startOfDay(for: date)
+        self.date = GoalEntry.startOfCivilDay(for: date)
         self.text = text
         self.updatedAt = updatedAt
     }

@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(DataStore.self) private var dataStore
     @Environment(PrayerService.self) private var prayer
+    @Environment(AppUsageService.self) private var usage
     @Environment(\.closeSettings) private var closeSettings
     
     @State private var panel: SettingsPanel = .goals
@@ -11,17 +12,23 @@ struct SettingsView: View {
     @State private var editingGoal: Goal?
     @State private var showingAddMode = false
     @State private var editingMode: DayMode?
+    @State private var showingAddApp = false
+    @State private var showingAddWebsite = false
     
     private enum SettingsPanel: String, CaseIterable {
         case goals = "Goals"
+        case schedule = "Days"
         case modes = "Modes"
         case prayer = "Prayer"
+        case time = "Time"
         
         var icon: String {
             switch self {
             case .goals: return "checklist"
+            case .schedule: return "calendar.badge.clock"
             case .modes: return "circle.grid.2x2.fill"
             case .prayer: return "moon.stars.fill"
+            case .time: return "clock.fill"
             }
         }
     }
@@ -39,10 +46,14 @@ struct SettingsView: View {
                 switch panel {
                 case .goals:
                     goalsList
+                case .schedule:
+                    ScheduleSettingsPanel()
                 case .modes:
                     modesList
                 case .prayer:
                     PrayerSettingsPanel()
+                case .time:
+                    AppTimeSettingsPanel(showingAddApp: $showingAddApp, showingAddWebsite: $showingAddWebsite)
                 }
             }
             
@@ -80,12 +91,23 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Refresh prayer times")
-            } else {
+            } else if panel == .time {
+                Menu {
+                    Button("Add app") { showingAddApp = true }
+                    Button("Add website") { showingAddWebsite = true }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.blue)
+                }
+                .menuIndicator(.hidden)
+                .help("Add app or website limit")
+            } else if panel == .goals || panel == .modes {
                 Button {
-                    if panel == .goals {
-                        showingAddGoal = true
-                    } else {
-                        showingAddMode = true
+                    switch panel {
+                    case .goals: showingAddGoal = true
+                    case .modes: showingAddMode = true
+                    default: break
                     }
                 } label: {
                     Image(systemName: "plus.circle.fill")
@@ -93,7 +115,9 @@ struct SettingsView: View {
                         .foregroundStyle(.blue)
                 }
                 .buttonStyle(.plain)
-                .help(panel == .goals ? "Add goal" : "Add mode")
+                .help(addHelp)
+            } else {
+                Color.clear.frame(width: 20, height: 20)
             }
         }
         .padding(.horizontal, 16)
@@ -103,8 +127,30 @@ struct SettingsView: View {
     private var headerTitle: String {
         switch panel {
         case .goals: return "Track Goals"
+        case .schedule: return "Schedule"
         case .modes: return "Day Modes"
         case .prayer: return "Prayer Times"
+        case .time: return "App Time"
+        }
+    }
+    
+    private var addHelp: String {
+        switch panel {
+        case .goals: return "Add goal"
+        case .modes: return "Add mode"
+        case .time: return "Add app or website"
+        case .prayer, .schedule: return ""
+        }
+    }
+    
+    private var timeFooterCount: String {
+        let apps = usage.limits.count
+        let sites = usage.websiteLimits.count
+        switch (apps, sites) {
+        case (0, 0): return "No limits yet"
+        case (_, 0): return "\(apps) app\(apps == 1 ? "" : "s") watched"
+        case (0, _): return "\(sites) site\(sites == 1 ? "" : "s") watched"
+        default: return "\(apps) apps · \(sites) sites"
         }
     }
     
@@ -121,11 +167,11 @@ struct SettingsView: View {
                         panel = item
                     }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 2) {
                         Image(systemName: item.icon)
-                            .font(.system(size: 10))
+                            .font(.system(size: 8))
                         Text(item.rawValue)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 9, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
@@ -166,11 +212,11 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .sheet(isPresented: $showingAddGoal) {
             GoalEditorSheet(goal: nil)
-                .frame(width: 400, height: 420)
+                .frame(width: 400, height: 520)
         }
         .sheet(item: $editingGoal) { goal in
             GoalEditorSheet(goal: goal)
-                .frame(width: 400, height: 420)
+                .frame(width: 400, height: 520)
         }
     }
     
@@ -216,6 +262,14 @@ struct SettingsView: View {
                 Text("Toggle to enable tracking")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
+            case .schedule:
+                Text(dataStore.settings.calendarDisplay.title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("Weekdays + day clock")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
             case .modes:
                 Text("\(dataStore.dayModes.count) modes")
                     .font(.system(size: 12))
@@ -236,6 +290,14 @@ struct SettingsView: View {
                 }
                 Spacer()
                 Text("Aladhan + your location")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            case .time:
+                Text(timeFooterCount)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("Cap green until over · 2m nags")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
@@ -319,7 +381,7 @@ private struct GoalSettingsRow: View {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive, action: onDelete)
         } message: {
-            Text("Are you sure you want to delete \"\(goal.title)\"? This will also remove all tracking data for this goal.")
+            Text("Remove \"\(goal.title)\" from the library and future days? Past frozen days keep their history.")
         }
     }
 }
@@ -425,6 +487,7 @@ struct GoalEditorSheet: View {
     
     @State private var title: String = ""
     @State private var selectedIcon: String = "star.fill"
+    @State private var weekdays: WeekdaySet = .all
     
     private let iconOptions = [
         "star.fill", "heart.fill", "bolt.fill", "flame.fill",
@@ -459,7 +522,8 @@ struct GoalEditorSheet: View {
             
             Divider()
             
-            VStack(spacing: 20) {
+            ScrollView {
+                VStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Goal Name")
                         .font(.system(size: 12, weight: .medium))
@@ -467,6 +531,19 @@ struct GoalEditorSheet: View {
                     
                     TextField("Enter goal name", text: $title)
                         .textFieldStyle(.roundedBorder)
+                }
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Weekdays")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    WeekdayChipsView(
+                        weekdays: $weekdays,
+                        presentation: dataStore.calendarPresentation
+                    )
+                    Text("Defaults to every day. Fine-tune the whole list in Schedule.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
                 }
                 
                 VStack(alignment: .leading, spacing: 8) {
@@ -513,13 +590,13 @@ struct GoalEditorSheet: View {
                 }
             }
             .padding(16)
-            
-            Spacer()
+            }
         }
         .onAppear {
             if let goal {
                 title = goal.title
                 selectedIcon = goal.icon
+                weekdays = goal.weekdays
             }
         }
     }
@@ -532,9 +609,10 @@ struct GoalEditorSheet: View {
             var updated = existingGoal
             updated.title = trimmedTitle
             updated.icon = selectedIcon
+            updated.weekdays = weekdays
             dataStore.updateGoal(updated)
         } else {
-            dataStore.addGoal(Goal(title: trimmedTitle, icon: selectedIcon))
+            dataStore.addGoal(Goal(title: trimmedTitle, icon: selectedIcon, weekdays: weekdays))
         }
         
         dismiss()
@@ -777,13 +855,14 @@ struct ModeEditorSheet: View {
     SettingsView()
         .environment(DataStore())
         .environment(PrayerService())
+        .environment(AppUsageService())
         .frame(width: 400, height: 600)
 }
 
 #Preview("Goal Editor") {
     GoalEditorSheet(goal: nil)
         .environment(DataStore())
-        .frame(width: 400, height: 420)
+        .frame(width: 400, height: 520)
 }
 
 #Preview("Mode Editor") {

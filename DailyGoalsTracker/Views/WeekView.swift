@@ -5,18 +5,21 @@ struct WeekView: View {
     @Environment(DataStore.self) private var dataStore
     @Binding var selectedDate: Date
     
-    private let calendar = Calendar.current
     private let dayColumnWidth: CGFloat = 32
     private let rowHeight: CGFloat = 28
     private let headerRowHeight: CGFloat = 28
     private let horizontalPadding: CGFloat = 12
     
+    private var presentation: CalendarPresentation {
+        dataStore.calendarPresentation
+    }
+    
     private var weekStart: Date {
-        calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedDate))!
+        presentation.weekStart(containing: selectedDate)
     }
     
     private var weekDates: [Date] {
-        (0..<7).map { calendar.date(byAdding: .day, value: $0, to: weekStart)! }
+        presentation.weekDates(containing: selectedDate)
     }
     
     private var weekProgress: Double {
@@ -24,20 +27,20 @@ struct WeekView: View {
         return summaries.reduce(0.0) { $0 + $1.completionPercentage } / 7.0
     }
     
-    private var activeGoals: [Goal] {
-        dataStore.goals.filter(\.isActive)
+    private var weekGoals: [Goal] {
+        dataStore.goalsForWeek(weekDates)
     }
     
     var body: some View {
         VStack(spacing: 0) {
             PeriodNavigationHeader(
-                title: weekTitle,
-                subtitle: weekSubtitle,
+                title: presentation.weekTitle(for: weekStart, logicalToday: dataStore.logicalDate()),
+                subtitle: presentation.weekRangeSubtitle(weekStart: weekStart),
                 onPrevious: {
-                    selectedDate = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedDate) ?? selectedDate
+                    selectedDate = presentation.shiftedWeek(selectedDate, by: -1)
                 },
                 onNext: {
-                    selectedDate = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedDate) ?? selectedDate
+                    selectedDate = presentation.shiftedWeek(selectedDate, by: 1)
                 }
             )
             
@@ -59,15 +62,15 @@ struct WeekView: View {
     private var goalRows: some View {
         ScrollView {
             LazyVStack(spacing: 3) {
-                if activeGoals.isEmpty {
-                    Text("No active goals")
+                if weekGoals.isEmpty {
+                    Text("No goals this week")
                         .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, horizontalPadding)
                         .frame(height: rowHeight)
                 } else {
-                    ForEach(activeGoals) { goal in
+                    ForEach(weekGoals) { goal in
                         weekGoalRow(for: goal)
                     }
                 }
@@ -78,30 +81,6 @@ struct WeekView: View {
         .scrollBounceBehavior(.basedOnSize)
         .defaultScrollAnchor(.top)
         .frame(maxHeight: .infinity, alignment: .top)
-    }
-    
-    private var weekTitle: String {
-        let thisWeekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
-        
-        if calendar.isDate(weekStart, equalTo: thisWeekStart, toGranularity: .weekOfYear) {
-            return "This Week"
-        } else if let lastWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: thisWeekStart),
-                  calendar.isDate(weekStart, equalTo: lastWeek, toGranularity: .weekOfYear) {
-            return "Last Week"
-        } else if let nextWeek = calendar.date(byAdding: .weekOfYear, value: 1, to: thisWeekStart),
-                  calendar.isDate(weekStart, equalTo: nextWeek, toGranularity: .weekOfYear) {
-            return "Next Week"
-        } else {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "'Week' w"
-            return formatter.string(from: weekStart)
-        }
-    }
-    
-    private var weekSubtitle: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return "\(formatter.string(from: weekStart)) – \(formatter.string(from: weekDates.last!))"
     }
     
     private var perfectDays: Int {
@@ -116,33 +95,23 @@ struct WeekView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             
             ForEach(weekDates, id: \.self) { date in
-                let isToday = calendar.isDateInToday(date)
+                let isToday = dataStore.isLogicalToday(date)
+                let jumuah = presentation.isJumuah(date)
                 VStack(spacing: 1) {
-                    Text(dayName(for: date))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(isToday ? AnyShapeStyle(.blue) : AnyShapeStyle(.tertiary))
-                    Text(dayNumber(for: date))
+                    Text(presentation.weekdayHeaderLetter(for: date))
+                        .font(.system(size: 10, weight: jumuah ? .semibold : .medium))
+                        .foregroundStyle(isToday ? AnyShapeStyle(.blue) : jumuah ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
+                    Text(presentation.dayNumber(for: date))
                         .font(.system(size: 11, weight: isToday ? .bold : .regular))
                         .foregroundStyle(isToday ? AnyShapeStyle(.blue) : AnyShapeStyle(.primary))
                 }
                 .frame(width: dayColumnWidth, height: headerRowHeight)
+                .help(presentation.weekdayName(for: date, style: .full))
             }
         }
         .padding(.horizontal, horizontalPadding)
         .padding(.top, 6)
         .padding(.bottom, 2)
-    }
-    
-    private func dayName(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEEE"
-        return formatter.string(from: date)
-    }
-    
-    private func dayNumber(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d"
-        return formatter.string(from: date)
     }
     
     private func weekGoalRow(for goal: Goal) -> some View {

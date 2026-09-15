@@ -40,11 +40,11 @@ struct PopoverView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingAddGoal) {
             GoalEditorSheet(goal: nil)
-                .frame(width: 400, height: 420)
+                .frame(width: 400, height: 520)
         }
         .sheet(item: $editingGoal) { goal in
             GoalEditorSheet(goal: goal)
-                .frame(width: 400, height: 420)
+                .frame(width: 400, height: 520)
         }
         .environment(\.closeSettings, CloseSettingsAction {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -52,9 +52,14 @@ struct PopoverView: View {
             }
         })
         .onReceive(NotificationCenter.default.publisher(for: .resetPopoverToToday)) { _ in
-            selectedDate = Date()
+            dataStore.ensureDaySnapshotsCurrent()
+            selectedDate = dataStore.logicalDate()
             selectedTab = .day
             showingSettings = false
+        }
+        .onAppear {
+            dataStore.ensureDaySnapshotsCurrent()
+            selectedDate = dataStore.logicalDate()
         }
     }
     
@@ -103,7 +108,7 @@ struct PopoverView: View {
                 .foregroundStyle(.purple)
             } else {
                 Button {
-                    selectedDate = Date()
+                    selectedDate = dataStore.logicalDate()
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.uturn.backward")
@@ -115,8 +120,8 @@ struct PopoverView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .opacity(Calendar.current.isDateInToday(selectedDate) ? 0.3 : 1)
-                .disabled(Calendar.current.isDateInToday(selectedDate))
+                .opacity(dataStore.isLogicalToday(selectedDate) ? 0.3 : 1)
+                .disabled(dataStore.isLogicalToday(selectedDate))
             }
         }
         .fixedSize()
@@ -245,4 +250,6 @@ struct CloseSettingsAction {
 #Preview("Popover View") {
     PopoverView()
         .environment(DataStore())
+        .environment(PrayerService())
+        .environment(AppUsageService())
 }
