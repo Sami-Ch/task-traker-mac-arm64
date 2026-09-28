@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Settings Pane Enum
 
-enum SettingsPane: String, CaseIterable, Identifiable {
+enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
     case general = "General"
     case goals = "Goals"
     case schedule = "Schedule"
@@ -22,71 +22,85 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .appTime: return "clock.fill"
         }
     }
+}
+
+// MARK: - Settings Router
+
+@Observable
+final class SettingsRouter {
+    var selectedPane: SettingsPane = .general
+    var goalIdToEdit: UUID?
     
-    var sectionHeader: String? {
-        switch self {
-        case .general: return nil
-        case .goals: return "Tracking"
-        case .prayer: return "Integrations"
-        default: return nil
-        }
+    func editGoal(_ goalId: UUID) {
+        selectedPane = .goals
+        goalIdToEdit = goalId
+    }
+    
+    func clearGoalEdit() {
+        goalIdToEdit = nil
     }
 }
 
 // MARK: - Settings Window View
 
 struct SettingsWindowView: View {
-    @Environment(DataStore.self) private var dataStore
-    @Environment(PrayerService.self) private var prayer
-    @Environment(AppUsageService.self) private var usage
+    @Environment(SettingsRouter.self) private var settingsRouter
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     
-    @State private var selectedPane: SettingsPane = .general
+    private static let windowSize = CGSize(width: 780, height: 540)
+    private static let sidebarWidth: CGFloat = 200
     
     var body: some View {
-        NavigationSplitView {
-            sidebar
+        @Bindable var router = settingsRouter
+        
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            List(selection: $router.selectedPane) {
+                Section {
+                    settingsLink(.general)
+                }
+                
+                Section("Tracking") {
+                    settingsLink(.goals)
+                    settingsLink(.schedule)
+                    settingsLink(.modes)
+                }
+                
+                Section("Integrations") {
+                    settingsLink(.prayer)
+                    settingsLink(.appTime)
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(
+                min: Self.sidebarWidth,
+                ideal: Self.sidebarWidth,
+                max: 240
+            )
         } detail: {
-            detailPane
+            detailPane(for: router.selectedPane)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 650, minHeight: 450)
-        .frame(idealWidth: 750, idealHeight: 550)
+        .navigationSplitViewStyle(.balanced)
+        .frame(
+            minWidth: Self.windowSize.width,
+            idealWidth: Self.windowSize.width,
+            minHeight: Self.windowSize.height,
+            idealHeight: Self.windowSize.height
+        )
+        .onAppear {
+            columnVisibility = .all
+        }
     }
     
-    // MARK: - Sidebar
-    
-    private var sidebar: some View {
-        List(selection: $selectedPane) {
-            // General (standalone)
-            NavigationLink(value: SettingsPane.general) {
-                Label(SettingsPane.general.rawValue, systemImage: SettingsPane.general.icon)
-            }
-            
-            // Tracking section
-            Section("Tracking") {
-                ForEach([SettingsPane.goals, .schedule, .modes], id: \.self) { pane in
-                    NavigationLink(value: pane) {
-                        Label(pane.rawValue, systemImage: pane.icon)
-                    }
-                }
-            }
-            
-            // Integrations section
-            Section("Integrations") {
-                ForEach([SettingsPane.prayer, .appTime], id: \.self) { pane in
-                    NavigationLink(value: pane) {
-                        Label(pane.rawValue, systemImage: pane.icon)
-                    }
-                }
-            }
+    private func settingsLink(_ pane: SettingsPane) -> some View {
+        NavigationLink(value: pane) {
+            Label(pane.rawValue, systemImage: pane.icon)
         }
-        .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 250)
+        .tag(pane)
     }
-    
-    // MARK: - Detail Pane
     
     @ViewBuilder
-    private var detailPane: some View {
+    private func detailPane(for selectedPane: SettingsPane) -> some View {
         switch selectedPane {
         case .general:
             GeneralSettingsPane()
@@ -111,4 +125,5 @@ struct SettingsWindowView: View {
         .environment(DataStore())
         .environment(PrayerService())
         .environment(AppUsageService())
+        .environment(SettingsRouter())
 }

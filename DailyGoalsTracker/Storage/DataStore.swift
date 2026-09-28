@@ -17,6 +17,8 @@ final class DataStore {
     
     /// Used for Maghrib-based day start. Set from AppDelegate.
     weak var prayerService: PrayerService?
+    /// Schedules project/milestone local notifications. Set from AppDelegate.
+    weak var projectAlertService: ProjectAlertService?
     
     var calendarPresentation: CalendarPresentation {
         CalendarPresentation(mode: settings.calendarDisplay)
@@ -128,10 +130,21 @@ final class DataStore {
     
     private func loadProjects() {
         guard let data = try? Data(contentsOf: projectsFileURL),
-              let decoded = try? JSONDecoder().decode([Project].self, from: data) else {
+              var decoded = try? JSONDecoder().decode([Project].self, from: data) else {
             return
         }
+        var didMigrate = false
+        for index in decoded.indices {
+            let before = decoded[index]
+            decoded[index].migrateLegacyLinkedGoalsIfNeeded()
+            if decoded[index] != before {
+                didMigrate = true
+            }
+        }
         projects = decoded.sorted { $0.order < $1.order }
+        if didMigrate {
+            saveProjects()
+        }
     }
     
     private func loadDayRecords() {
@@ -202,6 +215,7 @@ final class DataStore {
     private func saveProjects() {
         guard let data = try? JSONEncoder().encode(projects) else { return }
         try? data.write(to: projectsFileURL)
+        projectAlertService?.resyncAll(projects: projects)
     }
     
     private func saveDayRecords() {
@@ -875,12 +889,24 @@ final class DataStore {
     
     // MARK: - Projects Management
     
+    /// Active projects that have already started.
     var activeProjects: [Project] {
-        projects.filter { $0.status == .active }.sorted { $0.order < $1.order }
+        projects
+            .filter { $0.status == .active && $0.hasStarted }
+            .sorted { $0.order < $1.order }
+    }
+    
+    /// Active or paused projects whose start date is still in the future.
+    var upcomingProjects: [Project] {
+        projects
+            .filter { $0.isUpcoming }
+            .sorted { $0.startDate < $1.startDate }
     }
     
     var pausedProjects: [Project] {
-        projects.filter { $0.status == .paused }.sorted { $0.order < $1.order }
+        projects
+            .filter { $0.status == .paused && $0.hasStarted }
+            .sorted { $0.order < $1.order }
     }
     
     var completedProjects: [Project] {
@@ -928,7 +954,14 @@ final class DataStore {
     
     func toggleProjectMilestone(projectId: UUID, milestoneId: UUID) {
         guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
-        projects[index].toggleMilestone(id: milestoneId)
+        let project = projects[index]
+        let autoAchieved: Bool
+        if let milestone = project.milestones.first(where: { $0.id == milestoneId }) {
+            autoAchieved = milestoneProgress(for: milestone, in: project).isAutoAchieved
+        } else {
+            autoAchieved = false
+        }
+        projects[index].toggleMilestone(id: milestoneId, autoAchieved: autoAchieved)
         saveProjects()
     }
     
@@ -942,6 +975,54 @@ final class DataStore {
         guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
         projects[index].removeMilestone(id: milestoneId)
         saveProjects()
+    }
+    
+    func updateMilestone(projectId: UUID, milestone: Milestone) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].updateMilestone(milestone)
+        saveProjects()
+        syncMilestoneAutoComplete(projectId: projectId)
+    }
+    
+    func setMilestoneLinkedGoals(projectId: UUID, milestoneId: UUID, links: [MilestoneGoalLink]) {
+        guard let pIndex = projects.firstIndex(where: { $0.id == projectId }),
+              let mIndex = projects[pIndex].milestones.firstIndex(where: { $0.id == milestoneId }) else { return }
+        projects[pIndex].milestones[mIndex].linkedGoals = links
+        projects[pIndex].milestones[mIndex].suppressAutoComplete = false
+        saveProjects()
+        syncMilestoneAutoComplete(projectId: projectId)
+    }
+    
+    func addGoalLink(to projectId: UUID, milestoneId: UUID, goalId: UUID, targetCount: Int? = nil) {
+        guard let pIndex = projects.firstIndex(where: { $0.id == projectId }),
+              let mIndex = projects[pIndex].milestones.firstIndex(where: { $0.id == milestoneId }) else { return }
+        let milestone = projects[pIndex].milestones[mIndex]
+        guard !milestone.linkedGoals.contains(where: { $0.goalId == goalId }) else { return }
+        projects[pIndex].milestones[mIndex].linkedGoals.append(
+            MilestoneGoalLink(goalId: goalId, targetCount: targetCount)
+        )
+        projects[pIndex].milestones[mIndex].suppressAutoComplete = false
+        saveProjects()
+        syncMilestoneAutoComplete(projectId: projectId)
+    }
+    
+    func removeGoalLink(from projectId: UUID, milestoneId: UUID, linkId: UUID) {
+        guard let pIndex = projects.firstIndex(where: { $0.id == projectId }),
+              let mIndex = projects[pIndex].milestones.firstIndex(where: { $0.id == milestoneId }) else { return }
+        projects[pIndex].milestones[mIndex].linkedGoals.removeAll { $0.id == linkId }
+        projects[pIndex].milestones[mIndex].suppressAutoComplete = false
+        saveProjects()
+        syncMilestoneAutoComplete(projectId: projectId)
+    }
+    
+    func updateGoalLinkTarget(projectId: UUID, milestoneId: UUID, linkId: UUID, targetCount: Int?) {
+        guard let pIndex = projects.firstIndex(where: { $0.id == projectId }),
+              let mIndex = projects[pIndex].milestones.firstIndex(where: { $0.id == milestoneId }),
+              let lIndex = projects[pIndex].milestones[mIndex].linkedGoals.firstIndex(where: { $0.id == linkId }) else { return }
+        projects[pIndex].milestones[mIndex].linkedGoals[lIndex].targetCount = targetCount
+        projects[pIndex].milestones[mIndex].suppressAutoComplete = false
+        saveProjects()
+        syncMilestoneAutoComplete(projectId: projectId)
     }
     
     func completeProject(_ projectId: UUID) {
@@ -968,45 +1049,131 @@ final class DataStore {
         saveProjects()
     }
     
-    // MARK: - Project Progress Calculation
+    // MARK: - Project Alerts
     
-    /// Count of completions for a goal within a date range (for project auto-counting).
-    func completionsForGoal(_ goalId: UUID, in dateRange: ClosedRange<Date>) -> Int {
-        var count = 0
-        var currentDate = GoalEntry.startOfCivilDay(for: dateRange.lowerBound)
-        let endDate = GoalEntry.startOfCivilDay(for: dateRange.upperBound)
-        
-        while currentDate <= endDate {
-            let entry = getEntry(for: goalId, on: currentDate)
-            if entry.status == .done {
-                count += 1
-            }
-            guard let next = civilCalendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
-            currentDate = next
-        }
-        return count
+    func addAlert(to projectId: UUID, alert: ProjectAlert) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].addAlert(alert)
+        saveProjects()
     }
     
-    /// Calculate progress for a project (combines linked goal completions and milestones).
-    func projectProgress(for project: Project) -> ProjectProgress {
-        var totalCompletions = 0
-        for goalId in project.linkedGoalIds {
-            totalCompletions += completionsForGoal(goalId, in: project.dateRange)
+    func updateAlert(projectId: UUID, alert: ProjectAlert) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].updateAlert(alert)
+        saveProjects()
+    }
+    
+    func deleteAlert(projectId: UUID, alertId: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        projects[index].removeAlert(id: alertId)
+        saveProjects()
+    }
+    
+    func toggleAlert(projectId: UUID, alertId: UUID) {
+        guard let pIndex = projects.firstIndex(where: { $0.id == projectId }),
+              let aIndex = projects[pIndex].alerts.firstIndex(where: { $0.id == alertId }) else { return }
+        projects[pIndex].alerts[aIndex].isEnabled.toggle()
+        saveProjects()
+    }
+    
+    // MARK: - Project Progress Calculation
+    
+    /// Weighted completion sum for a goal in a date range (`done = 1`, `partial = 0.5`).
+    func completionsForGoal(_ goalId: UUID, in dateRange: ClosedRange<Date>) -> Double {
+        let start = GoalEntry.startOfCivilDay(for: dateRange.lowerBound)
+        var end = GoalEntry.startOfCivilDay(for: dateRange.upperBound)
+        if start > end { return 0 }
+        
+        let today = GoalEntry.startOfCivilDay(for: Date())
+        if end > today { end = today }
+        guard start <= end else { return 0 }
+        
+        var total = 0.0
+        for entry in entries.values {
+            guard entry.goalId == goalId else { continue }
+            let day = GoalEntry.startOfCivilDay(for: entry.date)
+            guard day >= start && day <= end else { continue }
+            total += entry.status.value
+        }
+        return total
+    }
+    
+    func milestoneProgress(for milestone: Milestone, in project: Project) -> MilestoneProgress {
+        let counting = project.hasStarted
+        let range = project.dateRange
+        
+        let goalProgress: [MilestoneGoalProgress] = milestone.linkedGoals.map { link in
+            let count = counting ? completionsForGoal(link.goalId, in: range) : 0
+            return MilestoneGoalProgress(
+                linkId: link.id,
+                goalId: link.goalId,
+                count: count,
+                targetCount: link.targetCount
+            )
         }
         
-        return ProjectProgress(
-            linkedCompletions: totalCompletions,
-            targetCount: project.targetCount,
-            completedMilestones: project.completedMilestones,
-            totalMilestones: project.totalMilestones
+        let linksWithTargets = goalProgress.filter(\.hasTarget)
+        let isAutoAchieved = counting
+            && !linksWithTargets.isEmpty
+            && linksWithTargets.allSatisfy(\.isTargetMet)
+        
+        let isEffectivelyComplete = milestone.isCompleted
+            || (isAutoAchieved && !milestone.suppressAutoComplete)
+        
+        return MilestoneProgress(
+            milestoneId: milestone.id,
+            goalProgress: goalProgress,
+            isAutoAchieved: isAutoAchieved,
+            isEffectivelyComplete: isEffectivelyComplete
         )
     }
     
-    /// Get goals that are linked to any project (for display purposes).
+    /// Persist auto-complete state for milestones whose targets are met.
+    func syncMilestoneAutoComplete(projectId: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        var project = projects[index]
+        var changed = false
+        
+        for mIndex in project.milestones.indices {
+            let milestone = project.milestones[mIndex]
+            let progress = milestoneProgress(for: milestone, in: project)
+            
+            if progress.isAutoAchieved && !milestone.suppressAutoComplete && !milestone.isCompleted {
+                project.milestones[mIndex].markCompleted(auto: true)
+                changed = true
+            } else if !progress.isAutoAchieved && milestone.suppressAutoComplete {
+                // Targets no longer met — clear suppress so future auto can fire
+                project.milestones[mIndex].suppressAutoComplete = false
+                changed = true
+            }
+        }
+        
+        if changed {
+            projects[index] = project
+            saveProjects()
+        }
+    }
+    
+    /// Calculate progress for a project from milestone completion (auto or manual).
+    func projectProgress(for project: Project) -> ProjectProgress {
+        let current = self.project(for: project.id) ?? project
+        
+        let details = current.milestones.map { milestoneProgress(for: $0, in: current) }
+        let completed = details.filter(\.isEffectivelyComplete).count
+        
+        return ProjectProgress(
+            completedMilestones: completed,
+            totalMilestones: current.milestones.count,
+            milestoneDetails: details,
+            hasStarted: current.hasStarted
+        )
+    }
+    
+    /// Get goals that are linked to any active/paused project milestone.
     func goalsLinkedToProjects() -> Set<UUID> {
         var linkedIds = Set<UUID>()
         for project in projects where project.isActive || project.isPaused {
-            linkedIds.formUnion(project.linkedGoalIds)
+            linkedIds.formUnion(project.allLinkedGoalIds)
         }
         return linkedIds
     }

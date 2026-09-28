@@ -11,12 +11,14 @@ struct ProjectsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // Migration banner
                 if dataStore.hasPlanningGoalsToMigrate {
                     migrationBanner
                 }
                 
-                // Active projects
+                if !dataStore.projects.isEmpty {
+                    newProjectButton
+                }
+                
                 if !dataStore.activeProjects.isEmpty {
                     projectSection(
                         title: "Active",
@@ -26,7 +28,16 @@ struct ProjectsView: View {
                     )
                 }
                 
-                // Paused projects
+                if !dataStore.upcomingProjects.isEmpty {
+                    projectSection(
+                        title: "Upcoming",
+                        icon: "calendar",
+                        color: .purple,
+                        projects: dataStore.upcomingProjects,
+                        isUpcoming: true
+                    )
+                }
+                
                 if !dataStore.pausedProjects.isEmpty {
                     projectSection(
                         title: "Paused",
@@ -36,17 +47,20 @@ struct ProjectsView: View {
                     )
                 }
                 
-                // Completed projects (collapsible)
                 if !dataStore.completedProjects.isEmpty {
                     completedSection
                 }
                 
-                // Empty state
                 if dataStore.projects.isEmpty && !dataStore.hasPlanningGoalsToMigrate {
                     emptyState
                 }
             }
             .padding(16)
+        }
+        .onAppear {
+            for project in dataStore.projects where project.hasStarted {
+                dataStore.syncMilestoneAutoComplete(projectId: project.id)
+            }
         }
         .sheet(isPresented: $showingAddProject) {
             ProjectEditorSheet(project: nil)
@@ -58,9 +72,44 @@ struct ProjectsView: View {
         }
     }
     
+    // MARK: - New Project
+    
+    private var newProjectButton: some View {
+        Button {
+            showingAddProject = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 14))
+                Text("New Project")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+            }
+            .foregroundStyle(.purple)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.purple.opacity(0.1))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.purple.opacity(0.2), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+    
     // MARK: - Section
     
-    private func projectSection(title: String, icon: String, color: Color, projects: [Project]) -> some View {
+    private func projectSection(
+        title: String,
+        icon: String,
+        color: Color,
+        projects: [Project],
+        isUpcoming: Bool = false
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
@@ -80,7 +129,8 @@ struct ProjectsView: View {
                 ProjectCard(
                     project: project,
                     progress: dataStore.projectProgress(for: project),
-                    onTap: { selectedProject = project }
+                    onTap: { selectedProject = project },
+                    isUpcoming: isUpcoming
                 )
             }
         }
@@ -163,7 +213,6 @@ struct ProjectsView: View {
                 .controlSize(.small)
                 
                 Button {
-                    // Clear without importing
                     dataStore.planningGoals.removeAll()
                 } label: {
                     Text("Dismiss")
@@ -197,7 +246,7 @@ struct ProjectsView: View {
             Text("No Projects Yet")
                 .font(.headline)
             
-            Text("Create a project to track long-term goals.\nLink daily tasks to see automatic progress.")
+            Text("Create a project with milestones.\nLink daily tasks on each milestone to track progress.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -223,13 +272,11 @@ struct ProjectCard: View {
     let progress: ProjectProgress
     let onTap: () -> Void
     var isCompleted: Bool = false
-    
-    @Environment(DataStore.self) private var dataStore
+    var isUpcoming: Bool = false
     
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 10) {
-                // Header
                 HStack(spacing: 10) {
                     ZStack {
                         Circle()
@@ -245,7 +292,11 @@ struct ProjectCard: View {
                             .font(.system(size: 14, weight: .semibold))
                             .lineLimit(1)
                         
-                        if let deadline = project.targetDate {
+                        if isUpcoming {
+                            Text("Starts \(project.startDate, style: .date)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.purple)
+                        } else if let deadline = project.targetDate {
                             Text(deadlineText(deadline))
                                 .font(.system(size: 10))
                                 .foregroundStyle(deadlineColor(deadline))
@@ -263,49 +314,51 @@ struct ProjectCard: View {
                         .foregroundStyle(.tertiary)
                 }
                 
-                // Progress bar
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule()
                             .fill(Color.primary.opacity(0.08))
                             .frame(height: 6)
                         
-                        Capsule()
-                            .fill(isCompleted ? Color.green : project.color)
-                            .frame(width: geo.size.width * progress.overallProgress, height: 6)
+                        if !isUpcoming {
+                            Capsule()
+                                .fill(isCompleted ? Color.green : project.color)
+                                .frame(width: geo.size.width * progress.overallProgress, height: 6)
+                        }
                     }
                 }
                 .frame(height: 6)
                 
-                // Stats
                 HStack(spacing: 12) {
-                    if project.hasTargetCount {
-                        statPill(
-                            icon: "repeat",
-                            text: "\(progress.linkedCompletions)/\(project.targetCount ?? 0)",
-                            color: .blue
-                        )
-                    } else if project.hasLinkedGoals {
-                        statPill(
-                            icon: "link",
-                            text: "\(progress.linkedCompletions) completions",
-                            color: .blue
-                        )
-                    }
-                    
                     if project.hasMilestones {
                         statPill(
                             icon: "flag.checkered",
-                            text: "\(progress.completedMilestones)/\(progress.totalMilestones)",
+                            text: isUpcoming
+                                ? "\(progress.totalMilestones) milestones"
+                                : "\(progress.completedMilestones)/\(progress.totalMilestones)",
                             color: .green
+                        )
+                    }
+                    
+                    if project.hasLinkedGoals {
+                        statPill(
+                            icon: "link",
+                            text: "\(project.allLinkedGoalIds.count) tasks",
+                            color: .blue
                         )
                     }
                     
                     Spacer()
                     
-                    Text("\(progress.overallProgressPercent)%")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(isCompleted ? .green : project.color)
+                    if isUpcoming {
+                        Text("Not started")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.purple.opacity(0.8))
+                    } else {
+                        Text("\(progress.overallProgressPercent)%")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(isCompleted ? .green : project.color)
+                    }
                 }
             }
             .padding(12)
@@ -315,12 +368,12 @@ struct ProjectCard: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(project.color.opacity(0.15), lineWidth: 1)
+                    .strokeBorder(project.color.opacity(isUpcoming ? 0.25 : 0.15), lineWidth: 1)
             )
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
-        .opacity(isCompleted ? 0.7 : 1)
+        .opacity(isCompleted ? 0.7 : (isUpcoming ? 0.85 : 1))
     }
     
     private func statPill(icon: String, text: String, color: Color) -> some View {
@@ -364,17 +417,13 @@ struct ProjectCard: View {
     }
 }
 
-// MARK: - Preview
-
 #Preview("Projects View") {
     let store = DataStore()
-    // Add sample projects for preview
     store.addProject(Project(
         title: "Learn Spanish",
         description: "Reach B2 level",
         startDate: Calendar.current.date(byAdding: .month, value: -2, to: Date())!,
         targetDate: Calendar.current.date(byAdding: .month, value: 4, to: Date()),
-        targetCount: 100,
         milestones: [
             Milestone(title: "Complete A1", isCompleted: true, order: 0),
             Milestone(title: "Complete A2", order: 1),

@@ -221,4 +221,5 @@ struct PopoverView: View {
         .environment(DataStore())
         .environment(PrayerService())
         .environment(AppUsageService())
+        .environment(SettingsRouter())
 }

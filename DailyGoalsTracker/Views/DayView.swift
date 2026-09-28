@@ -3,6 +3,7 @@ import SwiftUI
 /// Daily goals view with progress ring and goal list
 struct DayView: View {
     @Environment(DataStore.self) private var dataStore
+    @Environment(SettingsRouter.self) private var settingsRouter
     @Binding var selectedDate: Date
     
     @State private var showingOneOff = false
@@ -106,6 +107,10 @@ struct DayView: View {
                         dataStore.cycleStatus(for: goal.id, on: selectedDate)
                     }
                     .contextMenu {
+                        Button("Edit Goal…") {
+                            settingsRouter.editGoal(goal.id)
+                            NotificationCenter.default.post(name: .openSettingsWindow, object: nil)
+                        }
                         Button(oneOff ? "Remove one-off" : "Hide from this day") {
                             dataStore.hideGoal(goal.id, on: selectedDate)
                         }
@@ -236,5 +241,6 @@ private struct OneOffTaskSheet: View {
         .environment(DataStore())
         .environment(PrayerService())
         .environment(AppUsageService())
+        .environment(SettingsRouter())
         .frame(width: 400, height: 600)
 }

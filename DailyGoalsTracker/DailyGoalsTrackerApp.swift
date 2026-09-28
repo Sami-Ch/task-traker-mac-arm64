@@ -5,10 +5,18 @@ struct DailyGoalsTrackerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        // Menu bar app — Settings are opened via a managed NSWindow in AppDelegate
-        // (SwiftUI Settings scenes don't appear reliably for LSUIElement apps).
+        // Real Settings UI is an NSWindow owned by AppDelegate. The SwiftUI
+        // Settings scene does not appear the first time a menu-bar app asks for it.
         Settings {
             EmptyView()
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    appDelegate.showSettingsWindow()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 }

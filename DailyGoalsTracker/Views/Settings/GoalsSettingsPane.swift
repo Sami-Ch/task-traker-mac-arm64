@@ -1,16 +1,18 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct GoalsSettingsPane: View {
     @Environment(DataStore.self) private var dataStore
+    @Environment(SettingsRouter.self) private var settingsRouter
     
     @State private var showingAddGoal = false
     @State private var editingGoal: Goal?
+    @State private var draggedGoalId: UUID?
     
     var body: some View {
         VStack(spacing: 0) {
-            // Toolbar
             HStack {
-                Text("\(dataStore.goals.filter(\.isActive).count) active goals")
+                Text("\(dataStore.goals.filter(\.isActive).count) active · \(dataStore.goals.count) total")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 
@@ -21,36 +23,42 @@ struct GoalsSettingsPane: View {
                 } label: {
                     Label("Add Goal", systemImage: "plus")
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
             .padding(.vertical, 10)
             
             Divider()
             
-            // Goals list
             if dataStore.goals.isEmpty {
                 emptyState
             } else {
                 List {
-                    ForEach(dataStore.goals) { goal in
-                        GoalSettingsRow(
-                            goal: goal,
-                            onEdit: { editingGoal = goal },
-                            onDelete: {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    dataStore.deleteGoal(goal)
+                    Section {
+                        ForEach(dataStore.goals) { goal in
+                            GoalSettingsRow(
+                                goal: goal,
+                                draggedGoalId: $draggedGoalId,
+                                onEdit: { editingGoal = goal },
+                                onDelete: {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        dataStore.deleteGoal(goal)
+                                    }
+                                },
+                                onMove: { source, destination in
+                                    dataStore.moveGoal(from: source, to: destination)
                                 }
-                            }
-                        )
-                    }
-                    .onMove { source, destination in
-                        dataStore.moveGoal(from: source, to: destination)
+                            )
+                        }
+                    } footer: {
+                        Text("Drag the handle to reorder. Right-click a goal to edit or delete.")
                     }
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
             }
         }
-        .navigationTitle("Goals")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showingAddGoal) {
             GoalEditorSheet(goal: nil)
                 .frame(width: 400, height: 520)
@@ -58,6 +66,21 @@ struct GoalsSettingsPane: View {
         .sheet(item: $editingGoal) { goal in
             GoalEditorSheet(goal: goal)
                 .frame(width: 400, height: 520)
+        }
+        .onAppear { consumePendingGoalEdit() }
+        .onChange(of: settingsRouter.goalIdToEdit) { _, _ in
+            consumePendingGoalEdit()
+        }
+    }
+    
+    private func consumePendingGoalEdit() {
+        guard let goalId = settingsRouter.goalIdToEdit,
+              let goal = dataStore.goals.first(where: { $0.id == goalId }) else { return }
+        settingsRouter.clearGoalEdit()
+        // Present after the settings window is key. The first open creates
+        // that window in the same turn as this view appearing.
+        DispatchQueue.main.async {
+            editingGoal = goal
         }
     }
     
@@ -90,8 +113,10 @@ struct GoalsSettingsPane: View {
 
 struct GoalSettingsRow: View {
     let goal: Goal
+    @Binding var draggedGoalId: UUID?
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let onMove: (IndexSet, Int) -> Void
     
     @Environment(DataStore.self) private var dataStore
     @State private var isHovered = false
@@ -102,6 +127,12 @@ struct GoalSettingsRow: View {
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
+                .frame(width: 16, height: 20)
+                .contentShape(Rectangle())
+                .onDrag {
+                    draggedGoalId = goal.id
+                    return NSItemProvider(object: goal.id.uuidString as NSString)
+                }
             
             GoalIconView(icon: goal.icon, size: 14, isActive: goal.isActive)
             
@@ -110,6 +141,7 @@ struct GoalSettingsRow: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(goal.isActive ? .primary : .secondary)
                     .lineLimit(1)
+                    .onTapGesture(count: 2, perform: onEdit)
                 
                 if goal.weekdays != .all {
                     Text(weekdaysSummary)
@@ -160,7 +192,19 @@ struct GoalSettingsRow: View {
                 isHovered = hovering
             }
         }
-        .onTapGesture(perform: onEdit)
+        .onDrop(
+            of: [UTType.plainText],
+            delegate: GoalReorderDropDelegate(
+                targetGoal: goal,
+                goals: dataStore.goals,
+                draggedGoalId: $draggedGoalId,
+                onMove: onMove
+            )
+        )
+        .contextMenu {
+            Button("Edit Goal…", action: onEdit)
+            Button("Delete…", role: .destructive) { showDeleteConfirm = true }
+        }
         .alert("Delete Goal?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive, action: onDelete)
@@ -189,6 +233,35 @@ struct GoalSettingsRow: View {
         case .sunday: return "Sun"
         default: return ""
         }
+    }
+}
+
+// MARK: - Reorder Drop Delegate
+
+private struct GoalReorderDropDelegate: DropDelegate {
+    let targetGoal: Goal
+    let goals: [Goal]
+    @Binding var draggedGoalId: UUID?
+    let onMove: (IndexSet, Int) -> Void
+    
+    func dropEntered(info: DropInfo) {
+        guard let draggedGoalId,
+              draggedGoalId != targetGoal.id,
+              let from = goals.firstIndex(where: { $0.id == draggedGoalId }),
+              let to = goals.firstIndex(where: { $0.id == targetGoal.id }) else { return }
+        
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            onMove(IndexSet(integer: from), to > from ? to + 1 : to)
+        }
+    }
+    
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+    
+    func performDrop(info: DropInfo) -> Bool {
+        draggedGoalId = nil
+        return true
     }
 }
 
@@ -339,6 +412,7 @@ struct GoalEditorSheet: View {
 #Preview("Goals Pane") {
     GoalsSettingsPane()
         .environment(DataStore())
+        .environment(SettingsRouter())
         .frame(width: 500, height: 400)
 }
 

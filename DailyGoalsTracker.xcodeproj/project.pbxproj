@@ -53,6 +53,10 @@
 		A1000051 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051; };
 		A1000052 /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052; };
 		A1000053 /* ProjectEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000053; };
+		A1000054 /* ProjectAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000054; };
+		A1000055 /* ProjectAlertService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000055; };
+		A1000056 /* ProjectAlertEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000056; };
+		A1000057 /* alert.aiff in Resources */ = {isa = PBXBuildFile; fileRef = A2000057; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -104,6 +108,10 @@
 		A2000051 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
 		A2000052 /* ProjectDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
 		A2000053 /* ProjectEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectEditorSheet.swift; sourceTree = "<group>"; };
+		A2000054 /* ProjectAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectAlert.swift; sourceTree = "<group>"; };
+		A2000055 /* ProjectAlertService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectAlertService.swift; sourceTree = "<group>"; };
+		A2000056 /* ProjectAlertEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectAlertEditorSheet.swift; sourceTree = "<group>"; };
+		A2000057 /* alert.aiff */ = {isa = PBXFileReference; lastKnownFileType = audio.aiff; path = alert.aiff; sourceTree = "<group>"; };
 		A3000001 /* DailyGoalsTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyGoalsTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -150,6 +158,7 @@
 				A2000005 /* GoalStatus.swift */,
 				A2000018 /* PlanningGoal.swift */,
 				A2000050 /* Project.swift */,
+				A2000054 /* ProjectAlert.swift */,
 				A2000021 /* GoalIconPalette.swift */,
 				A2000022 /* DayMode.swift */,
 				A2000024 /* PrayerModels.swift */,
@@ -176,6 +185,7 @@
 			children = (
 				A2000025 /* PrayerService.swift */,
 				A2000030 /* AppUsageService.swift */,
+				A2000055 /* ProjectAlertService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -203,6 +213,7 @@
 				A2000051 /* ProjectsView.swift */,
 				A2000052 /* ProjectDetailView.swift */,
 				A2000053 /* ProjectEditorSheet.swift */,
+				A2000056 /* ProjectAlertEditorSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -233,8 +244,17 @@
 			isa = PBXGroup;
 			children = (
 				A2000015 /* Assets.xcassets */,
+				A5000010 /* Sounds */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A5000010 /* Sounds */ = {
+			isa = PBXGroup;
+			children = (
+				A2000057 /* alert.aiff */,
+			);
+			path = Sounds;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -296,6 +316,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000015 /* Assets.xcassets in Resources */,
+				A1000057 /* alert.aiff in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -351,6 +372,9 @@
 				A1000051 /* ProjectsView.swift in Sources */,
 				A1000052 /* ProjectDetailView.swift in Sources */,
 				A1000053 /* ProjectEditorSheet.swift in Sources */,
+				A1000054 /* ProjectAlert.swift in Sources */,
+				A1000055 /* ProjectAlertService.swift in Sources */,
+				A1000056 /* ProjectAlertEditorSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

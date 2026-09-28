@@ -89,7 +89,6 @@ struct ScheduleSettingsPane: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Schedule")
     }
     
     private func scheduleRow(_ goal: Goal) -> some View {

@@ -62,7 +62,6 @@ struct GeneralSettingsPane: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("General")
     }
     
     private var calendarBinding: Binding<CalendarDisplayMode> {

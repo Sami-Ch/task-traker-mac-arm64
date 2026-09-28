@@ -12,9 +12,6 @@ struct ProjectEditorSheet: View {
     @State private var startDate = Date()
     @State private var hasDeadline = false
     @State private var targetDate = Date()
-    @State private var linkedGoalIds: Set<UUID> = []
-    @State private var hasTargetCount = false
-    @State private var targetCount = 50
     @State private var selectedColor = "blue"
     @State private var selectedIcon = "flag.fill"
     
@@ -31,18 +28,18 @@ struct ProjectEditorSheet: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             header
             
             Divider()
             
-            // Form content
             ScrollView {
                 VStack(spacing: 20) {
                     basicInfoSection
                     datesSection
-                    linkedGoalsSection
-                    targetCountSection
+                    Text("Link daily tasks and set targets on each milestone after saving.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     appearanceSection
                 }
                 .padding(16)
@@ -130,113 +127,11 @@ struct ProjectEditorSheet: View {
                     }
                 }
             }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.primary.opacity(0.03))
-        )
-    }
-    
-    // MARK: - Linked Goals Section
-    
-    private var linkedGoalsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Link Daily Tasks")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("Progress auto-counts completions")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-            }
             
-            if dataStore.goals.isEmpty {
-                Text("No daily goals to link. Create some first in Settings.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .padding(10)
-            } else {
-                VStack(spacing: 2) {
-                    ForEach(dataStore.goals.filter(\.isActive)) { goal in
-                        let isLinked = linkedGoalIds.contains(goal.id)
-                        Button {
-                            if isLinked {
-                                linkedGoalIds.remove(goal.id)
-                            } else {
-                                linkedGoalIds.insert(goal.id)
-                            }
-                        } label: {
-                            HStack(spacing: 10) {
-                                GoalIconView(icon: goal.icon, size: 11, isActive: true)
-                                Text(goal.title)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .lineLimit(1)
-                                Spacer()
-                                Image(systemName: isLinked ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(isLinked ? .blue : .gray.opacity(0.35))
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(isLinked ? Color.blue.opacity(0.08) : Color.gray.opacity(0.04))
-                            )
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                
-                Text("\(linkedGoalIds.count) selected")
+            if GoalEntry.startOfCivilDay(for: startDate) > GoalEntry.startOfCivilDay(for: Date()) {
+                Text("This project will appear under Upcoming until the start date.")
                     .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-    
-    // MARK: - Target Count Section
-    
-    private var targetCountSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle(isOn: $hasTargetCount) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Set Target Count")
-                        .font(.system(size: 11, weight: .medium))
-                    Text("e.g., 'Complete 100 times'")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            
-            if hasTargetCount {
-                HStack(spacing: 12) {
-                    Text("Target:")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    
-                    TextField("", value: $targetCount, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 80)
-                    
-                    Text("completions")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                    
-                    Spacer()
-                }
-                .disabled(linkedGoalIds.isEmpty)
-                .opacity(linkedGoalIds.isEmpty ? 0.5 : 1)
-                
-                if linkedGoalIds.isEmpty {
-                    Text("Link at least one daily task above to use target count.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.orange)
-                }
+                    .foregroundStyle(.purple)
             }
         }
         .padding(12)
@@ -250,7 +145,6 @@ struct ProjectEditorSheet: View {
     
     private var appearanceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Color picker
             VStack(alignment: .leading, spacing: 6) {
                 Text("Color")
                     .font(.system(size: 11, weight: .medium))
@@ -279,7 +173,6 @@ struct ProjectEditorSheet: View {
                 }
             }
             
-            // Icon picker
             VStack(alignment: .leading, spacing: 6) {
                 Text("Icon")
                     .font(.system(size: 11, weight: .medium))
@@ -303,7 +196,6 @@ struct ProjectEditorSheet: View {
                 }
             }
             
-            // Preview
             VStack(alignment: .leading, spacing: 6) {
                 Text("Preview")
                     .font(.system(size: 11, weight: .medium))
@@ -344,9 +236,6 @@ struct ProjectEditorSheet: View {
         startDate = project.startDate
         hasDeadline = project.targetDate != nil
         targetDate = project.targetDate ?? Calendar.current.date(byAdding: .month, value: 3, to: Date())!
-        linkedGoalIds = Set(project.linkedGoalIds)
-        hasTargetCount = project.targetCount != nil
-        targetCount = project.targetCount ?? 50
         selectedColor = project.colorName
         selectedIcon = project.icon
     }
@@ -361,8 +250,6 @@ struct ProjectEditorSheet: View {
             updated.description = description.trimmingCharacters(in: .whitespaces)
             updated.startDate = startDate
             updated.targetDate = hasDeadline ? targetDate : nil
-            updated.linkedGoalIds = Array(linkedGoalIds)
-            updated.targetCount = hasTargetCount && !linkedGoalIds.isEmpty ? max(1, targetCount) : nil
             updated.colorName = selectedColor
             updated.icon = selectedIcon
             dataStore.updateProject(updated)
@@ -372,8 +259,6 @@ struct ProjectEditorSheet: View {
                 description: description.trimmingCharacters(in: .whitespaces),
                 startDate: startDate,
                 targetDate: hasDeadline ? targetDate : nil,
-                linkedGoalIds: Array(linkedGoalIds),
-                targetCount: hasTargetCount && !linkedGoalIds.isEmpty ? max(1, targetCount) : nil,
                 colorName: selectedColor,
                 icon: selectedIcon
             )
@@ -387,7 +272,7 @@ struct ProjectEditorSheet: View {
 #Preview("New Project") {
     ProjectEditorSheet(project: nil)
         .environment(DataStore())
-        .frame(width: 480, height: 600)
+        .frame(width: 480, height: 560)
 }
 
 #Preview("Edit Project") {
@@ -397,7 +282,6 @@ struct ProjectEditorSheet: View {
         description: "Reach B2 level",
         startDate: Date(),
         targetDate: Calendar.current.date(byAdding: .month, value: 6, to: Date()),
-        targetCount: 100,
         colorName: "purple",
         icon: "globe"
     )
@@ -405,5 +289,5 @@ struct ProjectEditorSheet: View {
     
     return ProjectEditorSheet(project: project)
         .environment(store)
-        .frame(width: 480, height: 600)
+        .frame(width: 480, height: 560)
 }

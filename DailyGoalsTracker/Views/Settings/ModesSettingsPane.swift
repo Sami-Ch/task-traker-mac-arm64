@@ -8,7 +8,6 @@ struct ModesSettingsPane: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Toolbar
             HStack {
                 Text("\(dataStore.dayModes.count) modes")
                     .font(.caption)
@@ -21,13 +20,14 @@ struct ModesSettingsPane: View {
                 } label: {
                     Label("Add Mode", systemImage: "plus")
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
             .padding(.vertical, 10)
             
             Divider()
             
-            // Modes list
             List {
                 ForEach(dataStore.sortedDayModes) { mode in
                     ModeSettingsRow(
@@ -46,7 +46,7 @@ struct ModesSettingsPane: View {
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
         }
-        .navigationTitle("Day Modes")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showingAddMode) {
             ModeEditorSheet(mode: nil)
                 .frame(width: 400, height: 500)

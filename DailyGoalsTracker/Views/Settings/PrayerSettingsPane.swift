@@ -41,7 +41,6 @@ struct PrayerSettingsPane: View {
             // Use existing panel
             PrayerSettingsPanel()
         }
-        .navigationTitle("Prayer Times")
     }
 }
 

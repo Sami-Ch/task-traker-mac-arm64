@@ -38,53 +38,117 @@ enum ProjectStatus: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Milestone Goal Link
+
+/// A daily task linked to a milestone, with an optional completion target.
+struct MilestoneGoalLink: Identifiable, Codable, Equatable, Hashable {
+    let id: UUID
+    var goalId: UUID
+    var targetCount: Int?
+    
+    init(id: UUID = UUID(), goalId: UUID, targetCount: Int? = nil) {
+        self.id = id
+        self.goalId = goalId
+        self.targetCount = targetCount
+    }
+    
+    var hasTarget: Bool {
+        guard let targetCount else { return false }
+        return targetCount > 0
+    }
+}
+
 // MARK: - Milestone
 
-struct Milestone: Identifiable, Codable, Equatable, Hashable {
+struct Milestone: Identifiable, Equatable, Hashable {
     let id: UUID
     var title: String
     var isCompleted: Bool
     var completedAt: Date?
     var order: Int
+    var linkedGoals: [MilestoneGoalLink]
+    /// Set when the user manually uncompletes while targets are still met.
+    var suppressAutoComplete: Bool
     
     init(
         id: UUID = UUID(),
         title: String,
         isCompleted: Bool = false,
         completedAt: Date? = nil,
-        order: Int = 0
+        order: Int = 0,
+        linkedGoals: [MilestoneGoalLink] = [],
+        suppressAutoComplete: Bool = false
     ) {
         self.id = id
         self.title = title
         self.isCompleted = isCompleted
         self.completedAt = completedAt
         self.order = order
+        self.linkedGoals = linkedGoals
+        self.suppressAutoComplete = suppressAutoComplete
     }
     
-    mutating func toggle() {
-        isCompleted.toggle()
-        completedAt = isCompleted ? Date() : nil
+    var hasLinkedGoals: Bool {
+        !linkedGoals.isEmpty
+    }
+    
+    var linkedGoalIds: [UUID] {
+        linkedGoals.map(\.goalId)
+    }
+    
+    mutating func markCompleted(auto: Bool = false) {
+        isCompleted = true
+        completedAt = Date()
+        if auto {
+            suppressAutoComplete = false
+        }
+    }
+    
+    mutating func markIncomplete(suppressAuto: Bool) {
+        isCompleted = false
+        completedAt = nil
+        suppressAutoComplete = suppressAuto
+    }
+}
+
+extension Milestone: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, isCompleted, completedAt, order, linkedGoals, suppressAutoComplete
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
+        linkedGoals = try container.decodeIfPresent([MilestoneGoalLink].self, forKey: .linkedGoals) ?? []
+        suppressAutoComplete = try container.decodeIfPresent(Bool.self, forKey: .suppressAutoComplete) ?? false
     }
 }
 
 // MARK: - Project
 
-struct Project: Identifiable, Codable, Equatable, Hashable {
+struct Project: Identifiable, Equatable, Hashable {
     let id: UUID
     var title: String
     var description: String
-    var plan: String                    // Markdown plan/notes
+    var plan: String
     var startDate: Date
-    var targetDate: Date?               // Optional deadline
+    var targetDate: Date?
     var status: ProjectStatus
-    var linkedGoalIds: [UUID]           // Daily tasks that contribute
-    var targetCount: Int?               // e.g., "Exercise 100 times"
     var milestones: [Milestone]
+    var alerts: [ProjectAlert]
     var createdAt: Date
     var completedAt: Date?
     var order: Int
-    var colorName: String               // For visual distinction
-    var icon: String                    // SF Symbol
+    var colorName: String
+    var icon: String
+    
+    /// Legacy fields kept only for migration from older JSON; not written on save.
+    private var legacyLinkedGoalIds: [UUID] = []
+    private var legacyTargetCount: Int? = nil
     
     // MARK: - Initialization
     
@@ -96,9 +160,8 @@ struct Project: Identifiable, Codable, Equatable, Hashable {
         startDate: Date = Date(),
         targetDate: Date? = nil,
         status: ProjectStatus = .active,
-        linkedGoalIds: [UUID] = [],
-        targetCount: Int? = nil,
         milestones: [Milestone] = [],
+        alerts: [ProjectAlert] = [],
         createdAt: Date = Date(),
         completedAt: Date? = nil,
         order: Int = 0,
@@ -112,9 +175,8 @@ struct Project: Identifiable, Codable, Equatable, Hashable {
         self.startDate = startDate
         self.targetDate = targetDate
         self.status = status
-        self.linkedGoalIds = linkedGoalIds
-        self.targetCount = targetCount
         self.milestones = milestones
+        self.alerts = alerts
         self.createdAt = createdAt
         self.completedAt = completedAt
         self.order = order
@@ -148,19 +210,39 @@ struct Project: Identifiable, Codable, Equatable, Hashable {
         targetDate != nil
     }
     
-    var hasLinkedGoals: Bool {
-        !linkedGoalIds.isEmpty
-    }
-    
     var hasMilestones: Bool {
         !milestones.isEmpty
     }
     
-    var hasTargetCount: Bool {
-        targetCount != nil && targetCount! > 0
+    /// Civil start-of-day has arrived (or passed).
+    var hasStarted: Bool {
+        let today = GoalEntry.startOfCivilDay(for: Date())
+        let start = GoalEntry.startOfCivilDay(for: startDate)
+        return start <= today
     }
     
-    // MARK: - Milestone Progress
+    /// Active/paused project whose start date is still in the future.
+    var isUpcoming: Bool {
+        (isActive || isPaused) && !hasStarted
+    }
+    
+    var allLinkedGoalIds: [UUID] {
+        milestones.flatMap(\.linkedGoalIds)
+    }
+    
+    var hasLinkedGoals: Bool {
+        !allLinkedGoalIds.isEmpty
+    }
+    
+    var projectScopedAlerts: [ProjectAlert] {
+        alerts.filter { $0.milestoneId == nil }
+    }
+    
+    func alerts(forMilestoneId milestoneId: UUID) -> [ProjectAlert] {
+        alerts.filter { $0.milestoneId == milestoneId }
+    }
+    
+    // MARK: - Milestone Progress (stored flags only)
     
     var completedMilestones: Int {
         milestones.filter(\.isCompleted).count
@@ -184,10 +266,16 @@ struct Project: Identifiable, Codable, Equatable, Hashable {
     
     // MARK: - Date Range
     
-    /// The date range for counting daily task completions.
+    /// Inclusive range for counting daily-task completions.
+    /// Collapses to a single instant when the project has not started yet so
+    /// Swift never traps on an inverted `ClosedRange`.
     var dateRange: ClosedRange<Date> {
-        let end = targetDate ?? Date()
-        return startDate...end
+        let today = Date()
+        let endLimit = min(targetDate ?? today, today)
+        if startDate <= endLimit {
+            return startDate...endLimit
+        }
+        return startDate...startDate
     }
     
     // MARK: - Mutations
@@ -210,9 +298,15 @@ struct Project: Identifiable, Codable, Equatable, Hashable {
         status = .archived
     }
     
-    mutating func toggleMilestone(id: UUID) {
+    mutating func toggleMilestone(id: UUID, autoAchieved: Bool = false) {
         guard let index = milestones.firstIndex(where: { $0.id == id }) else { return }
-        milestones[index].toggle()
+        let wasCompleted = milestones[index].isCompleted
+        if wasCompleted {
+            // Manual uncomplete — suppress auto if targets still met
+            milestones[index].markIncomplete(suppressAuto: autoAchieved)
+        } else {
+            milestones[index].markCompleted(auto: false)
+        }
     }
     
     mutating func addMilestone(_ title: String) {
@@ -222,6 +316,7 @@ struct Project: Identifiable, Codable, Equatable, Hashable {
     
     mutating func removeMilestone(id: UUID) {
         milestones.removeAll { $0.id == id }
+        removeAlerts(forMilestoneId: id)
     }
     
     mutating func reorderMilestones(from source: IndexSet, to destination: Int) {
@@ -229,6 +324,102 @@ struct Project: Identifiable, Codable, Equatable, Hashable {
         for (index, _) in milestones.enumerated() {
             milestones[index].order = index
         }
+    }
+    
+    mutating func updateMilestone(_ milestone: Milestone) {
+        guard let index = milestones.firstIndex(where: { $0.id == milestone.id }) else { return }
+        milestones[index] = milestone
+    }
+    
+    mutating func addAlert(_ alert: ProjectAlert) {
+        alerts.append(alert)
+    }
+    
+    mutating func updateAlert(_ alert: ProjectAlert) {
+        guard let index = alerts.firstIndex(where: { $0.id == alert.id }) else { return }
+        alerts[index] = alert
+    }
+    
+    mutating func removeAlert(id: UUID) {
+        alerts.removeAll { $0.id == id }
+    }
+    
+    mutating func removeAlerts(forMilestoneId milestoneId: UUID) {
+        alerts.removeAll { $0.milestoneId == milestoneId }
+    }
+    
+    /// Fold legacy project-level linked goals into a milestone (idempotent).
+    mutating func migrateLegacyLinkedGoalsIfNeeded() {
+        guard !legacyLinkedGoalIds.isEmpty else { return }
+        
+        let links = legacyLinkedGoalIds.map { goalId in
+            MilestoneGoalLink(goalId: goalId, targetCount: legacyTargetCount)
+        }
+        
+        if let index = milestones.indices.first {
+            let existingIds = Set(milestones[index].linkedGoals.map(\.goalId))
+            for link in links where !existingIds.contains(link.goalId) {
+                milestones[index].linkedGoals.append(link)
+            }
+        } else {
+            milestones.append(Milestone(
+                title: "Progress",
+                order: 0,
+                linkedGoals: links
+            ))
+        }
+        
+        legacyLinkedGoalIds = []
+        legacyTargetCount = nil
+    }
+}
+
+// MARK: - Codable
+
+extension Project: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, description, plan, startDate, targetDate, status
+        case milestones, alerts, createdAt, completedAt, order, colorName, icon
+        case linkedGoalIds, targetCount
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        plan = try container.decodeIfPresent(String.self, forKey: .plan) ?? ""
+        startDate = try container.decode(Date.self, forKey: .startDate)
+        targetDate = try container.decodeIfPresent(Date.self, forKey: .targetDate)
+        status = try container.decode(ProjectStatus.self, forKey: .status)
+        milestones = try container.decodeIfPresent([Milestone].self, forKey: .milestones) ?? []
+        alerts = try container.decodeIfPresent([ProjectAlert].self, forKey: .alerts) ?? []
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
+        colorName = try container.decodeIfPresent(String.self, forKey: .colorName) ?? "blue"
+        icon = try container.decodeIfPresent(String.self, forKey: .icon) ?? "flag.fill"
+        legacyLinkedGoalIds = try container.decodeIfPresent([UUID].self, forKey: .linkedGoalIds) ?? []
+        legacyTargetCount = try container.decodeIfPresent(Int.self, forKey: .targetCount)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(description, forKey: .description)
+        try container.encode(plan, forKey: .plan)
+        try container.encode(startDate, forKey: .startDate)
+        try container.encodeIfPresent(targetDate, forKey: .targetDate)
+        try container.encode(status, forKey: .status)
+        try container.encode(milestones, forKey: .milestones)
+        try container.encode(alerts, forKey: .alerts)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(completedAt, forKey: .completedAt)
+        try container.encode(order, forKey: .order)
+        try container.encode(colorName, forKey: .colorName)
+        try container.encode(icon, forKey: .icon)
+        // Intentionally omit legacy linkedGoalIds / targetCount
     }
 }
 
@@ -266,50 +457,62 @@ enum ProjectColorName: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-// MARK: - Progress Calculation Result
+// MARK: - Progress Calculation Results
+
+struct MilestoneGoalProgress: Identifiable, Equatable {
+    var id: UUID { linkId }
+    let linkId: UUID
+    let goalId: UUID
+    let count: Double
+    let targetCount: Int?
+    
+    var hasTarget: Bool {
+        guard let targetCount else { return false }
+        return targetCount > 0
+    }
+    
+    var isTargetMet: Bool {
+        guard let targetCount, targetCount > 0 else { return false }
+        return count + 0.0001 >= Double(targetCount)
+    }
+    
+    var progressFraction: Double {
+        guard let targetCount, targetCount > 0 else { return 0 }
+        return min(count / Double(targetCount), 1.0)
+    }
+}
+
+struct MilestoneProgress: Equatable {
+    let milestoneId: UUID
+    let goalProgress: [MilestoneGoalProgress]
+    let isAutoAchieved: Bool
+    let isEffectivelyComplete: Bool
+    
+    var targetsMetCount: Int {
+        goalProgress.filter(\.isTargetMet).count
+    }
+    
+    var targetsTotalCount: Int {
+        goalProgress.filter(\.hasTarget).count
+    }
+}
 
 struct ProjectProgress {
-    let linkedCompletions: Int      // Count of daily task completions
-    let targetCount: Int?           // Target count if set
     let completedMilestones: Int
     let totalMilestones: Int
+    let milestoneDetails: [MilestoneProgress]
+    let hasStarted: Bool
     
-    /// Overall progress percentage (0-1) combining both metrics
     var overallProgress: Double {
-        var weights: [(progress: Double, weight: Double)] = []
-        
-        // Add linked goal progress if applicable
-        if let target = targetCount, target > 0 {
-            let goalProgress = min(Double(linkedCompletions) / Double(target), 1.0)
-            weights.append((goalProgress, 1.0))
-        }
-        
-        // Add milestone progress if applicable
-        if totalMilestones > 0 {
-            let milestoneProgress = Double(completedMilestones) / Double(totalMilestones)
-            weights.append((milestoneProgress, 1.0))
-        }
-        
-        // If no metrics, return 0
-        guard !weights.isEmpty else { return 0 }
-        
-        // Weighted average (equal weights for now)
-        let totalWeight = weights.reduce(0) { $0 + $1.weight }
-        let weightedSum = weights.reduce(0) { $0 + $1.progress * $1.weight }
-        return weightedSum / totalWeight
-    }
-    
-    var linkedProgressPercent: Int {
-        guard let target = targetCount, target > 0 else { return 0 }
-        return Int(min(Double(linkedCompletions) / Double(target), 1.0) * 100)
-    }
-    
-    var milestoneProgressPercent: Int {
-        guard totalMilestones > 0 else { return 0 }
-        return Int(Double(completedMilestones) / Double(totalMilestones) * 100)
+        guard hasStarted, totalMilestones > 0 else { return 0 }
+        return Double(completedMilestones) / Double(totalMilestones)
     }
     
     var overallProgressPercent: Int {
         Int(overallProgress * 100)
+    }
+    
+    func detail(for milestoneId: UUID) -> MilestoneProgress? {
+        milestoneDetails.first { $0.milestoneId == milestoneId }
     }
 }

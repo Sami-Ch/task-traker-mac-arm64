@@ -22,7 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     let dataStore = DataStore()
     let prayerService = PrayerService()
     let appUsageService = AppUsageService()
+    let projectAlertService = ProjectAlertService()
     let journalState = JournalWindowState()
+    let settingsRouter = SettingsRouter()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
@@ -31,8 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         setupEventMonitor()
         setupGlobalHotKey()
         dataStore.prayerService = prayerService
+        dataStore.projectAlertService = projectAlertService
+        projectAlertService.attach(dataStore: dataStore)
         prayerService.bootstrap()
         appUsageService.bootstrap()
+        projectAlertService.bootstrap()
         dataStore.ensureDaySnapshotsCurrent()
         startFreezeTimer()
         
@@ -71,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             .environment(dataStore)
             .environment(prayerService)
             .environment(appUsageService)
+            .environment(settingsRouter)
             .environment(\.openJournal, OpenJournalAction { [weak self] date in
                 self?.showJournalWindow(for: date)
             })
@@ -177,17 +183,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     
     func showSettingsWindow() {
+        // Create the window ourselves. The SwiftUI Settings scene does not
+        // exist until it has been shown once, so the first Edit Goal click
+        // had nothing to order front.
         if settingsWindow == nil {
             let content = SettingsWindowView()
                 .environment(dataStore)
                 .environment(prayerService)
                 .environment(appUsageService)
+                .environment(settingsRouter)
             let hosting = NSHostingController(rootView: content)
             let window = NSWindow(contentViewController: hosting)
             window.title = "Settings"
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.setContentSize(NSSize(width: 750, height: 550))
-            window.minSize = NSSize(width: 650, height: 450)
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            window.toolbarStyle = .unified
+            window.setContentSize(NSSize(width: 780, height: 540))
+            window.minSize = NSSize(width: 700, height: 460)
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()
@@ -201,10 +212,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         
-        if let window = settingsWindow {
-            if window.isMiniaturized {
-                window.deminiaturize(nil)
-            }
+        guard let window = settingsWindow else { return }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        
+        // Closing the popover can resign key in the same turn.
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
         }
     }
@@ -283,6 +299,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     
     func windowWillClose(_ notification: Notification) {
+        handleManagedWindowWillClose(notification)
+    }
+    
+    private func handleManagedWindowWillClose(_ notification: Notification) {
         let closing = notification.object as? NSWindow
         
         if closing === journalWindow {
@@ -306,6 +326,8 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     ) {
         if response.actionIdentifier == AppUsageService.snoozeActionId {
             appUsageService.snoozeReminders()
+        } else if ProjectAlertService.snoozeMinutes(for: response.actionIdentifier) != nil {
+            projectAlertService.handleSnooze(response: response)
         }
         completionHandler()
     }

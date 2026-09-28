@@ -32,7 +32,6 @@ struct AppTimeSettingsPane: View {
             // Use existing panel
             AppTimeSettingsPanel(showingAddApp: $showingAddApp, showingAddWebsite: $showingAddWebsite)
         }
-        .navigationTitle("App Time")
     }
     
     private var statusText: String {
