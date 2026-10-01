@@ -6,6 +6,7 @@ struct GoalRow: View {
     let entry: GoalEntry
     var showsEssentialBadge: Bool = false
     var isOneOff: Bool = false
+    var onEdit: (() -> Void)? = nil
     let onStatusChange: () -> Void
     
     @State private var isHovered = false
@@ -16,28 +17,34 @@ struct GoalRow: View {
             
             HStack(spacing: 4) {
                 Text(goal.title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.body)
                     .lineLimit(1)
                 if isOneOff {
                     Image(systemName: "1.circle")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.blue)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
                         .help("One-off task for this day only")
                 }
                 if showsEssentialBadge {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 8))
+                        .font(.caption)
                         .foregroundStyle(.yellow)
                 }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard isOneOff else { return }
+                onEdit?()
             }
             
             Spacer()
             
-            StatusButton(status: entry.status, size: 24, action: onStatusChange)
+            StatusButton(status: entry.status, size: 26, action: onStatusChange)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .frame(height: 36)
+        .frame(minHeight: 44)
         .fixedSize(horizontal: false, vertical: true)
         .background {
             RoundedRectangle(cornerRadius: 8)

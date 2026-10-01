@@ -15,7 +15,7 @@ enum PlanningHorizon: String, Codable, CaseIterable, Identifiable {
         case .week: return "This Week"
         case .month: return "This Month"
         case .year: return "This Year"
-        case .life: return "Life Goals"
+        case .life: return "Life Tasks"
         }
     }
     
@@ -41,7 +41,7 @@ enum PlanningHorizon: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .week: return "What do you want to accomplish this week?"
         case .month: return "What are your monthly objectives?"
-        case .year: return "What are your goals for this year?"
+        case .year: return "What are your tasks for this year?"
         case .life: return "What's your ultimate vision?"
         }
     }

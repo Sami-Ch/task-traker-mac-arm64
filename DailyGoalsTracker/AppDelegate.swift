@@ -8,11 +8,18 @@ extension Notification.Name {
     static let openSettingsWindow = Notification.Name("openSettingsWindow")
 }
 
-/// AppDelegate managing the menu bar status item and popover
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
+/// Borderless menu-bar panel. Must be able to become key so fields and buttons work.
+private final class MenuBarPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+/// AppDelegate managing the menu bar status item and the tasks panel.
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
-    private var popover: NSPopover!
+    private var panel: NSPanel?
     private var eventMonitor: Any?
+    private var localEventMonitor: Any?
     private var hotKeyRef: EventHotKeyRef?
     private var journalWindow: NSWindow?
     private var settingsWindow: NSWindow?
@@ -23,21 +30,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     let prayerService = PrayerService()
     let appUsageService = AppUsageService()
     let projectAlertService = ProjectAlertService()
+    let periodReportService = PeriodReportService()
     let journalState = JournalWindowState()
     let settingsRouter = SettingsRouter()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         setupStatusItem()
-        setupPopover()
+        setupPanel()
         setupEventMonitor()
         setupGlobalHotKey()
         dataStore.prayerService = prayerService
         dataStore.projectAlertService = projectAlertService
+        dataStore.periodReportService = periodReportService
         projectAlertService.attach(dataStore: dataStore)
+        periodReportService.attach(dataStore: dataStore)
         prayerService.bootstrap()
         appUsageService.bootstrap()
         projectAlertService.bootstrap()
+        periodReportService.bootstrap()
         dataStore.ensureDaySnapshotsCurrent()
         startFreezeTimer()
         
@@ -54,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Daily Goals")
+            button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Daily Tasks")
             button.image?.size = NSSize(width: 18, height: 18)
             button.action = #selector(togglePopover)
             button.target = self
@@ -64,14 +75,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
     }
     
-    // MARK: - Popover Setup
-    private func setupPopover() {
-        popover = NSPopover()
-        popover.contentSize = NSSize(width: 400, height: 600)
-        popover.behavior = .transient
-        popover.animates = true
-        popover.delegate = self
-        
+    // MARK: - Panel Setup
+    
+    private static let panelSize = NSSize(width: 400, height: 600)
+    
+    private var isPanelVisible: Bool {
+        panel?.isVisible == true
+    }
+    
+    private func setupPanel() {
         let contentView = PopoverView()
             .environment(dataStore)
             .environment(prayerService)
@@ -80,16 +92,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             .environment(\.openJournal, OpenJournalAction { [weak self] date in
                 self?.showJournalWindow(for: date)
             })
-        popover.contentViewController = NSHostingController(rootView: contentView)
+        let hosting = NSHostingController(rootView: contentView)
+        hosting.view.frame = NSRect(origin: .zero, size: Self.panelSize)
+        hosting.view.wantsLayer = true
+        hosting.view.layer?.cornerRadius = 12
+        hosting.view.layer?.masksToBounds = true
+        
+        let panel = MenuBarPanel(
+            contentRect: NSRect(origin: .zero, size: Self.panelSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.isMovableByWindowBackground = false
+        panel.hidesOnDeactivate = false
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.contentViewController = hosting
+        self.panel = panel
     }
     
     // MARK: - Event Monitor (Click Outside to Close)
     private func setupEventMonitor() {
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            if let popover = self?.popover, popover.isShown {
-                popover.performClose(nil)
-            }
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            self?.closePanelIfClickOutside(event)
         }
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            self?.closePanelIfClickOutside(event)
+            return event
+        }
+    }
+    
+    private func closePanelIfClickOutside(_ event: NSEvent) {
+        guard isPanelVisible, let panel else { return }
+        let location = NSEvent.mouseLocation
+        if panel.frame.contains(location) { return }
+        if let button = statusItem.button, let buttonWindow = button.window {
+            let buttonRect = button.convert(button.bounds, to: nil)
+            let screenRect = buttonWindow.convertToScreen(buttonRect)
+            if screenRect.contains(location) { return }
+        }
+        hidePanel()
     }
     
     // MARK: - Global Hotkey (Cmd+Shift+G)
@@ -121,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     
     // MARK: - Actions
     @objc func togglePopover() {
-        guard let button = statusItem.button else { return }
+        guard statusItem.button != nil else { return }
         
         let event = NSApp.currentEvent
         
@@ -131,13 +178,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             return
         }
         
-        // Left-click toggles popover
-        if popover.isShown {
-            popover.performClose(nil)
+        if isPanelVisible {
+            hidePanel()
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
+            showPanel()
         }
+    }
+    
+    private func showPanel() {
+        guard let panel, let button = statusItem.button, let buttonWindow = button.window else { return }
+        
+        dataStore.ensureDaySnapshotsCurrent()
+        NotificationCenter.default.post(name: .resetPopoverToToday, object: nil)
+        appUsageService.recordOpen()
+        Task {
+            await prayerService.refresh()
+            dataStore.ensureDaySnapshotsCurrent()
+        }
+        
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+        let size = Self.panelSize
+        var x = screenRect.midX - size.width / 2
+        var y = screenRect.minY - size.height - 8
+        if let screen = buttonWindow.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            x = min(max(visible.minX + 8, x), visible.maxX - size.width - 8)
+            y = min(max(visible.minY + 8, y), visible.maxY - size.height - 8)
+        }
+        panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    private func hidePanel() {
+        panel?.orderOut(nil)
     }
     
     private func showContextMenu() {
@@ -163,7 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         
         menu.addItem(NSMenuItem.separator())
         
-        menu.addItem(NSMenuItem(title: "Open Goals Tracker", action: #selector(togglePopover), keyEquivalent: "g"))
+        menu.addItem(NSMenuItem(title: "Open Tasks", action: #selector(togglePopover), keyEquivalent: "g"))
         menu.addItem(NSMenuItem(title: "Open Journal", action: #selector(openJournalFromMenu), keyEquivalent: "j"))
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
@@ -205,9 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             settingsWindow = window
         }
         
-        if popover.isShown {
-            popover.performClose(nil)
-        }
+        hidePanel()
         
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -243,9 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             journalWindow = window
         }
         
-        if popover.isShown {
-            popover.performClose(nil)
-        }
+        hidePanel()
         
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -265,7 +336,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     
     private func startFreezeTimer() {
         freezeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.dataStore.ensureDaySnapshotsCurrent()
+            guard let self else { return }
+            self.dataStore.ensureDaySnapshotsCurrent()
+            Task { @MainActor in
+                await self.periodReportService.checkDueReports()
+            }
         }
         freezeTimer?.tolerance = 10
     }
@@ -278,24 +353,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if let eventMonitor = eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
+        if let localEventMonitor = localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
+        }
         if let hotKeyRef = hotKeyRef {
             UnregisterEventHotKey(hotKeyRef)
         }
-    }
-    
-    // MARK: - NSPopoverDelegate
-    func popoverWillShow(_ notification: Notification) {
-        dataStore.ensureDaySnapshotsCurrent()
-        NotificationCenter.default.post(name: .resetPopoverToToday, object: nil)
-        appUsageService.recordOpen()
-        Task {
-            await prayerService.refresh()
-            dataStore.ensureDaySnapshotsCurrent()
-        }
-    }
-    
-    func popoverDidClose(_ notification: Notification) {
-        // Cleanup when popover closes
     }
     
     func windowWillClose(_ notification: Notification) {
@@ -328,6 +391,9 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             appUsageService.snoozeReminders()
         } else if ProjectAlertService.snoozeMinutes(for: response.actionIdentifier) != nil {
             projectAlertService.handleSnooze(response: response)
+        } else if let reportId = PeriodReportService.reportId(from: response) {
+            settingsRouter.showReport(reportId)
+            showSettingsWindow()
         }
         completionHandler()
     }

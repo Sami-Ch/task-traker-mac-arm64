@@ -95,15 +95,14 @@ struct ProjectAlertEditorSheet: View {
     private var header: some View {
         HStack {
             Button("Cancel") { dismiss() }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .keyboardShortcut(.cancelAction)
             Spacer()
             Text(isEditing ? "Edit Alert" : "New Alert")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.headline)
             Spacer()
             Button("Save") { save() }
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)
         }
         .padding(.horizontal, 16)

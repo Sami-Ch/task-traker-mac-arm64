@@ -21,7 +21,7 @@ struct GoalsSettingsPane: View {
                 Button {
                     showingAddGoal = true
                 } label: {
-                    Label("Add Goal", systemImage: "plus")
+                    Label("Add Task", systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -52,7 +52,7 @@ struct GoalsSettingsPane: View {
                             )
                         }
                     } footer: {
-                        Text("Drag the handle to reorder. Right-click a goal to edit or delete.")
+                        Text("Drag the handle to reorder. Right-click a task to edit or delete.")
                     }
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
@@ -90,15 +90,15 @@ struct GoalsSettingsPane: View {
                 .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
             
-            Text("No Goals Yet")
+            Text("No Tasks Yet")
                 .font(.headline)
             
-            Text("Add your first goal to start tracking daily habits.")
+            Text("Add your first task to start tracking the day.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             
-            Button("Add Goal") {
+            Button("Add Task") {
                 showingAddGoal = true
             }
             .buttonStyle(.borderedProminent)
@@ -160,7 +160,7 @@ struct GoalSettingsRow: View {
                             .foregroundStyle(.blue.opacity(0.8))
                     }
                     .buttonStyle(.plain)
-                    .help("Edit goal")
+                    .help("Edit task")
                     
                     Button { showDeleteConfirm = true } label: {
                         Image(systemName: "trash.circle.fill")
@@ -168,7 +168,7 @@ struct GoalSettingsRow: View {
                             .foregroundStyle(.red.opacity(0.8))
                     }
                     .buttonStyle(.plain)
-                    .help("Delete goal")
+                    .help("Delete task")
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
@@ -202,10 +202,10 @@ struct GoalSettingsRow: View {
             )
         )
         .contextMenu {
-            Button("Edit Goal…", action: onEdit)
+            Button("Edit Task…", action: onEdit)
             Button("Delete…", role: .destructive) { showDeleteConfirm = true }
         }
-        .alert("Delete Goal?", isPresented: $showDeleteConfirm) {
+        .alert("Delete Task?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive, action: onDelete)
         } message: {
@@ -295,7 +295,7 @@ struct GoalEditorSheet: View {
                 
                 Spacer()
                 
-                Text(goal == nil ? "New Goal" : "Edit Goal")
+                Text(goal == nil ? "New Task" : "Edit Task")
                     .font(.system(size: 14, weight: .semibold))
                 
                 Spacer()
@@ -313,11 +313,11 @@ struct GoalEditorSheet: View {
             ScrollView {
                 VStack(spacing: 20) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Goal Name")
+                        Text("Task Name")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.secondary)
                         
-                        TextField("Enter goal name", text: $title)
+                        TextField("Enter task name", text: $title)
                             .textFieldStyle(.roundedBorder)
                     }
                     
@@ -331,7 +331,7 @@ struct GoalEditorSheet: View {
                             presentation: dataStore.calendarPresentation
                         )
                         
-                        Text("Select which days this goal appears. Fine-tune the full list in Schedule settings.")
+                        Text("Select which days this task appears. Fine-tune the full list in Schedule settings.")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }
@@ -366,7 +366,7 @@ struct GoalEditorSheet: View {
                         
                         HStack(spacing: 12) {
                             GoalIconView(icon: selectedIcon, size: 14)
-                            Text(title.isEmpty ? "Goal Name" : title)
+                            Text(title.isEmpty ? "Task Name" : title)
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundStyle(title.isEmpty ? .secondary : .primary)
                             Spacer()

@@ -11,6 +11,8 @@ final class ProjectAlertService {
     static let idPrefix = "project.alert."
     
     private weak var dataStore: DataStore?
+    /// Monotonic token so only the latest `resyncAll` may remove and reschedule.
+    private var resyncGeneration: UInt64 = 0
     
     func attach(dataStore: DataStore) {
         self.dataStore = dataStore
@@ -74,14 +76,32 @@ final class ProjectAlertService {
     // MARK: - Resync
     
     func resyncAll(projects: [Project]) {
+        resyncGeneration &+= 1
+        let generation = resyncGeneration
+        let snapshot = projects
+        
         let center = UNUserNotificationCenter.current()
         center.getPendingNotificationRequests { [weak self] requests in
-            let stale = requests.map(\.identifier).filter { $0.hasPrefix(Self.idPrefix) }
-            center.removePendingNotificationRequests(withIdentifiers: stale)
-            
             guard let self else { return }
-            for project in projects {
-                self.schedule(project: project)
+            guard generation == self.resyncGeneration else { return }
+            
+            let pendingStale = requests.map(\.identifier).filter { $0.hasPrefix(Self.idPrefix) }
+            center.removePendingNotificationRequests(withIdentifiers: pendingStale)
+            
+            center.getDeliveredNotifications { delivered in
+                guard generation == self.resyncGeneration else { return }
+                
+                let deliveredStale = delivered
+                    .map(\.request.identifier)
+                    .filter { $0.hasPrefix(Self.idPrefix) }
+                if !deliveredStale.isEmpty {
+                    center.removeDeliveredNotifications(withIdentifiers: deliveredStale)
+                }
+                
+                guard generation == self.resyncGeneration else { return }
+                for project in snapshot {
+                    self.schedule(project: project)
+                }
             }
         }
     }

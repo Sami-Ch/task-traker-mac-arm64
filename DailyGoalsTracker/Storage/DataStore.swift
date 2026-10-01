@@ -14,11 +14,14 @@ final class DataStore {
     var snapshots: [String: DaySnapshot] = [:]  // Key: date string
     var settings: TrackerSettings = .default
     var projects: [Project] = []  // Long-running projects with linked goals
+    var periodReports: [PeriodReport] = []
     
     /// Used for Maghrib-based day start. Set from AppDelegate.
     weak var prayerService: PrayerService?
     /// Schedules project/milestone local notifications. Set from AppDelegate.
     weak var projectAlertService: ProjectAlertService?
+    /// Weekly / monthly Apple Intelligence reports. Set from AppDelegate.
+    weak var periodReportService: PeriodReportService?
     
     var calendarPresentation: CalendarPresentation {
         CalendarPresentation(mode: settings.calendarDisplay)
@@ -72,6 +75,10 @@ final class DataStore {
         appSupportURL.appendingPathComponent("projects.json")
     }
     
+    private var periodReportsFileURL: URL {
+        appSupportURL.appendingPathComponent("period_reports.json")
+    }
+    
     private var civilCalendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
@@ -102,6 +109,7 @@ final class DataStore {
         loadJournals()
         loadSnapshots()
         loadSettings()
+        loadPeriodReports()
     }
     
     private func loadGoals() {
@@ -187,6 +195,14 @@ final class DataStore {
         settings = decoded
     }
     
+    private func loadPeriodReports() {
+        guard let data = try? Data(contentsOf: periodReportsFileURL),
+              let decoded = try? JSONDecoder().decode([PeriodReport].self, from: data) else {
+            return
+        }
+        periodReports = decoded.sorted { $0.createdAt > $1.createdAt }
+    }
+    
     /// Seed default modes (and migrate old `isEssential` flags into accepted goal lists).
     private func ensureDayModes() {
         guard dayModes.isEmpty else { return }
@@ -246,10 +262,36 @@ final class DataStore {
         try? data.write(to: settingsFileURL)
     }
     
+    func setWorkingStyleNotes(_ text: String) {
+        settings.workingStyleNotes = text
+        saveSettings()
+    }
+    
+    private func savePeriodReports() {
+        guard let data = try? JSONEncoder().encode(periodReports) else { return }
+        try? data.write(to: periodReportsFileURL)
+    }
+    
     func updateSettings(_ mutate: (inout TrackerSettings) -> Void) {
         mutate(&settings)
         saveSettings()
         ensureDaySnapshotsCurrent()
+    }
+    
+    // MARK: - Period Reports
+    
+    func periodReport(id: String) -> PeriodReport? {
+        periodReports.first { $0.id == id }
+    }
+    
+    func upsertPeriodReport(_ report: PeriodReport) {
+        if let index = periodReports.firstIndex(where: { $0.id == report.id }) {
+            periodReports[index] = report
+        } else {
+            periodReports.insert(report, at: 0)
+        }
+        periodReports.sort { $0.createdAt > $1.createdAt }
+        savePeriodReports()
     }
     
     // MARK: - Logical date / freeze
@@ -397,12 +439,14 @@ final class DataStore {
     }
     
     func hideGoal(_ goalId: UUID, on date: Date) {
+        if isOneOff(goalId, on: date) {
+            deleteOneOffTask(goalId, on: date)
+            return
+        }
         mutateSnapshot(for: date) { snap in
             if snap.frozen {
                 snap.items.removeAll { $0.goalId == goalId }
                 Self.reindex(&snap.items)
-            } else if snap.oneOffItems.contains(where: { $0.goalId == goalId }) {
-                snap.oneOffItems.removeAll { $0.goalId == goalId }
             } else {
                 snap.extraGoalIds.removeAll { $0 == goalId }
                 if !snap.hiddenGoalIds.contains(goalId) {
@@ -459,6 +503,34 @@ final class DataStore {
             return snap.items.first(where: { $0.goalId == goalId })?.isOneOff == true
         }
         return snap?.oneOffItems.contains(where: { $0.goalId == goalId }) == true
+    }
+    
+    func updateOneOffTask(_ goalId: UUID, title: String, icon: String, on date: Date) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, isOneOff(goalId, on: date) else { return }
+        mutateSnapshot(for: date) { snap in
+            if snap.frozen, let index = snap.items.firstIndex(where: { $0.goalId == goalId }) {
+                snap.items[index].title = trimmed
+                snap.items[index].icon = icon
+            } else if let index = snap.oneOffItems.firstIndex(where: { $0.goalId == goalId }) {
+                snap.oneOffItems[index].title = trimmed
+                snap.oneOffItems[index].icon = icon
+            }
+        }
+    }
+    
+    func deleteOneOffTask(_ goalId: UUID, on date: Date) {
+        mutateSnapshot(for: date) { snap in
+            if snap.frozen {
+                snap.items.removeAll { $0.goalId == goalId && $0.isOneOff }
+                Self.reindex(&snap.items)
+            }
+            snap.oneOffItems.removeAll { $0.goalId == goalId }
+        }
+        let key = "\(goalId.uuidString)_\(GoalEntry.dateString(from: date))"
+        if entries.removeValue(forKey: key) != nil {
+            saveEntries()
+        }
     }
     
     func goalsAvailableToAdd(on date: Date) -> [Goal] {
@@ -758,6 +830,70 @@ final class DataStore {
             dayMode: dayMode,
             skippedCount: skipped.count
         )
+    }
+    
+    /// Daily completion and per-task rates for a report chart.
+    func periodChart(from start: Date, through end: Date) -> (days: [ReportDayBar], tasks: [ReportTaskBar]) {
+        let calendar = Calendar(identifier: .gregorian)
+        var cursor = GoalEntry.startOfCivilDay(for: start)
+        let last = GoalEntry.startOfCivilDay(for: end)
+        var dates: [Date] = []
+        while cursor <= last {
+            dates.append(cursor)
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        
+        let useWeekday = dates.count <= 10
+        let labelFormatter = DateFormatter()
+        labelFormatter.dateFormat = useWeekday ? "EEE" : "d"
+        
+        var buckets: [UUID: (title: String, done: Int, partial: Int, tracked: Int)] = [:]
+        var dayBars: [ReportDayBar] = []
+        
+        for date in dates {
+            let summary = getDailySummary(for: date)
+            dayBars.append(ReportDayBar(
+                dateString: GoalEntry.dateString(from: date),
+                label: labelFormatter.string(from: date),
+                percent: Int((summary.completionPercentage * 100).rounded())
+            ))
+            for entry in summary.entries {
+                let title = goals.first(where: { $0.id == entry.goalId })?.title ?? "Task"
+                var bucket = buckets[entry.goalId] ?? (title, 0, 0, 0)
+                bucket.tracked += 1
+                if entry.status == .done {
+                    bucket.done += 1
+                } else if entry.status == .partial {
+                    bucket.partial += 1
+                }
+                buckets[entry.goalId] = bucket
+            }
+        }
+        
+        let tasks = buckets.values
+            .map { bucket -> ReportTaskBar in
+                let percent: Int
+                if bucket.tracked == 0 {
+                    percent = 0
+                } else {
+                    let score = Double(bucket.done) + Double(bucket.partial) * 0.5
+                    percent = Int((score / Double(bucket.tracked) * 100).rounded())
+                }
+                return ReportTaskBar(
+                    title: bucket.title,
+                    done: bucket.done,
+                    partial: bucket.partial,
+                    tracked: bucket.tracked,
+                    percent: percent
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.percent == rhs.percent { return lhs.title < rhs.title }
+                return lhs.percent < rhs.percent
+            }
+        
+        return (dayBars, tasks)
     }
     
     func getWeekEntries(for date: Date) -> [[GoalEntry]] {
@@ -1167,6 +1303,149 @@ final class DataStore {
             milestoneDetails: details,
             hasStarted: current.hasStarted
         )
+    }
+    
+    /// Streak of linked daily tasks, last 7 days, and a short encouraging line.
+    func projectMomentum(for project: Project) -> ProjectMomentum {
+        let current = self.project(for: project.id) ?? project
+        let progress = projectProgress(for: current)
+        let linkedIds = current.allLinkedGoalIds
+        let today = computeLogicalDate(Date())
+        let start = GoalEntry.startOfCivilDay(for: current.startDate)
+        
+        let daysSinceStart = max(
+            0,
+            civilCalendar.dateComponents([.day], from: start, to: today).day ?? 0
+        )
+        
+        var recent: [ProjectMomentum.DayMark] = []
+        for offset in (0..<7).reversed() {
+            guard let date = civilCalendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+            recent.append(ProjectMomentum.DayMark(date: date, kind: projectDayKind(current, on: date)))
+        }
+        
+        let streak: Int
+        if current.hasStarted, !current.isCompleted, !linkedIds.isEmpty {
+            streak = projectLinkedStreak(current, today: today, start: start)
+        } else {
+            streak = 0
+        }
+        
+        return ProjectMomentum(
+            streak: streak,
+            daysSinceStart: daysSinceStart,
+            linkedTaskCount: Set(linkedIds).count,
+            recentDays: recent,
+            encouragement: projectEncouragement(
+                current,
+                progress: progress,
+                streak: streak,
+                linkedCount: Set(linkedIds).count
+            )
+        )
+    }
+    
+    private func projectDayKind(_ project: Project, on date: Date) -> ProjectMomentum.DayKind {
+        let linked = Set(project.allLinkedGoalIds)
+        guard !linked.isEmpty, project.hasStarted else { return .none }
+        let day = GoalEntry.startOfCivilDay(for: date)
+        if day < GoalEntry.startOfCivilDay(for: project.startDate) { return .none }
+        if project.isCompleted, let done = project.completedAt,
+           day > GoalEntry.startOfCivilDay(for: done) {
+            return .none
+        }
+        
+        let trackedIds = Set(goalsForDay(date).tracked.map(\.id))
+        let relevant = linked.intersection(trackedIds)
+        guard !relevant.isEmpty else { return .skipped }
+        
+        let values = relevant.map { getEntry(for: $0, on: date).status.value }
+        let average = values.reduce(0, +) / Double(values.count)
+        if average >= 1 { return .done }
+        if average > 0 { return .partial }
+        return .missed
+    }
+    
+    private func projectLinkedStreak(_ project: Project, today: Date, start: Date) -> Int {
+        var streak = 0
+        var day = today
+        var countedToday = false
+        var steps = 0
+        while day >= start && steps < 400 {
+            steps += 1
+            switch projectDayKind(project, on: day) {
+            case .skipped, .none:
+                break
+            case .done, .partial:
+                streak += 1
+                if civilCalendar.isDate(day, inSameDayAs: today) {
+                    countedToday = true
+                }
+            case .missed:
+                if streak == 0, !countedToday, civilCalendar.isDate(day, inSameDayAs: today) {
+                    break
+                }
+                return streak
+            }
+            guard let previous = civilCalendar.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        return streak
+    }
+    
+    private func projectEncouragement(
+        _ project: Project,
+        progress: ProjectProgress,
+        streak: Int,
+        linkedCount: Int
+    ) -> String {
+        if project.isUpcoming {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            return "Starts \(formatter.string(from: project.startDate)). Nothing to count yet."
+        }
+        if project.isPaused {
+            return "Paused. Progress is saved."
+        }
+        if project.isCompleted {
+            return "Finished. That work is yours."
+        }
+        if let label = project.deadlineLabel(), label.color == .red {
+            if streak > 0 {
+                return "Past the date, still moving. \(streak)-day streak."
+            }
+            return "Past the date. A linked task today still counts."
+        }
+        
+        let percent = progress.overallProgressPercent
+        let remaining = max(0, progress.totalMilestones - progress.completedMilestones)
+        
+        if linkedCount == 0 {
+            if let next = project.nextMilestone {
+                return "Next: \(next.title). Link a daily task in Manage to track it."
+            }
+            return "Link a daily task in Manage to see this move."
+        }
+        if percent >= 75, remaining > 0 {
+            let left = remaining == 1 ? "1 milestone left" : "\(remaining) milestones left"
+            return "Close. \(left)."
+        }
+        if percent >= 50, remaining > 0 {
+            return "Halfway. Keep the streak going."
+        }
+        if streak == 0 {
+            return "A linked task today starts the streak."
+        }
+        if streak == 1 {
+            return "You showed up today. Come back tomorrow."
+        }
+        if streak < 7 {
+            return "\(streak) days in a row. Keep going."
+        }
+        if streak < 14 {
+            return "\(streak)-day streak. That is taking hold."
+        }
+        return "\(streak) days straight. You are building this."
     }
     
     /// Get goals that are linked to any active/paused project milestone.

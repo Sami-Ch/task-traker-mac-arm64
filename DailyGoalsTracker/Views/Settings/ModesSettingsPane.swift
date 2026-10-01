@@ -74,10 +74,10 @@ struct ModeSettingsRow: View {
     
     private var goalSummary: String {
         if mode.tracksAllGoals {
-            return "All goals"
+            return "All tasks"
         }
         let count = mode.acceptedGoalIds.count
-        return count == 0 ? "No goals" : "\(count) goal\(count == 1 ? "" : "s")"
+        return count == 0 ? "No tasks" : "\(count) task\(count == 1 ? "" : "s")"
     }
     
     var body: some View {
@@ -285,7 +285,7 @@ struct ModeEditorSheet: View {
     @ViewBuilder
     private var goalsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Goals for this mode")
+            Text("Tasks for this mode")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             
@@ -293,7 +293,7 @@ struct ModeEditorSheet: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.blue)
-                    Text("Normal mode tracks all active goals")
+                    Text("Normal mode tracks all active tasks")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -301,7 +301,7 @@ struct ModeEditorSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.08)))
             } else if dataStore.goals.isEmpty {
-                Text("Add goals in the Goals panel first.")
+                Text("Add tasks in the Tasks panel first.")
                     .font(.system(size: 12))
                     .foregroundStyle(.tertiary)
             } else {
@@ -339,7 +339,7 @@ struct ModeEditorSheet: View {
                     }
                 }
                 
-                Text("\(acceptedGoalIds.count) selected · unchecked goals are skipped on this mode")
+                Text("\(acceptedGoalIds.count) selected · unchecked tasks are skipped on this mode")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

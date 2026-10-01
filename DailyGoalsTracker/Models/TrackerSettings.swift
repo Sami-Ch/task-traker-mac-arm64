@@ -27,24 +27,34 @@ struct TrackerSettings: Codable, Equatable {
     var dayEndMinutes: Int
     /// When true, Maghrib (from prayer times) is the day start; falls back to `dayStartMinutes`.
     var dayStartsAtMaghrib: Bool
+    /// Weekly and monthly progress reports (notification + optional Apple Intelligence summary).
+    var periodReportsEnabled: Bool
+    /// How the person works, used when reports suggest easier tasks.
+    var workingStyleNotes: String
     
     static let `default` = TrackerSettings(
         calendarDisplay: .gregorian,
         dayStartMinutes: 0,
         dayEndMinutes: 23 * 60 + 59,
-        dayStartsAtMaghrib: false
+        dayStartsAtMaghrib: false,
+        periodReportsEnabled: true,
+        workingStyleNotes: ""
     )
     
     init(
         calendarDisplay: CalendarDisplayMode = .gregorian,
         dayStartMinutes: Int = 0,
         dayEndMinutes: Int = 23 * 60 + 59,
-        dayStartsAtMaghrib: Bool = false
+        dayStartsAtMaghrib: Bool = false,
+        periodReportsEnabled: Bool = true,
+        workingStyleNotes: String = ""
     ) {
         self.calendarDisplay = calendarDisplay
         self.dayStartMinutes = Self.clampedMinutes(dayStartMinutes)
         self.dayEndMinutes = Self.clampedMinutes(dayEndMinutes)
         self.dayStartsAtMaghrib = dayStartsAtMaghrib
+        self.periodReportsEnabled = periodReportsEnabled
+        self.workingStyleNotes = workingStyleNotes
     }
     
     init(from decoder: Decoder) throws {
@@ -53,6 +63,8 @@ struct TrackerSettings: Codable, Equatable {
         dayStartMinutes = Self.clampedMinutes(try c.decodeIfPresent(Int.self, forKey: .dayStartMinutes) ?? 0)
         dayEndMinutes = Self.clampedMinutes(try c.decodeIfPresent(Int.self, forKey: .dayEndMinutes) ?? (23 * 60 + 59))
         dayStartsAtMaghrib = try c.decodeIfPresent(Bool.self, forKey: .dayStartsAtMaghrib) ?? false
+        periodReportsEnabled = try c.decodeIfPresent(Bool.self, forKey: .periodReportsEnabled) ?? true
+        workingStyleNotes = try c.decodeIfPresent(String.self, forKey: .workingStyleNotes) ?? ""
     }
     
     static func clampedMinutes(_ value: Int) -> Int {

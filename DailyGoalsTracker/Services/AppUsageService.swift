@@ -620,8 +620,8 @@ final class AppUsageService {
         }
         deliver(
             id: "apptime.goal.\(id).\(todayKey())",
-            title: "Goal met: \(name)",
-            body: "You hit today's \(goal) goal."
+            title: "Minimum met: \(name)",
+            body: "You hit today's \(goal)."
         )
     }
     
@@ -816,7 +816,7 @@ extension AppUsageService {
         var result: [AppCandidate] = []
         
         if let id = ownBundleId {
-            let name = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "Daily Goals Tracker"
+            let name = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "Daily Tasks"
             seen.insert(id)
             result.append(AppCandidate(bundleIdentifier: id, name: name, path: Bundle.main.bundlePath))
         }

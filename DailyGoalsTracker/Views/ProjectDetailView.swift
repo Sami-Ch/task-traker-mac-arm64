@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Detail view for a single project
+/// Detail view for a single project. Used in Settings.
 struct ProjectDetailView: View {
     @Environment(DataStore.self) private var dataStore
-    @Environment(\.dismiss) private var dismiss
     
     let project: Project
+    let onBack: () -> Void
     
     @State private var showingEditor = false
     @State private var newMilestoneTitle = ""
@@ -23,42 +23,34 @@ struct ProjectDetailView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            
-            Divider()
-            
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if currentProject.isUpcoming {
-                        upcomingBanner
-                    }
-                    
-                    progressSection
-                    
-                    if !currentProject.description.isEmpty {
-                        descriptionSection
-                    }
-                    
-                    milestonesSection
-                    
-                    alertsSection
-                    
-                    planSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                BackLinkButton(title: "Projects", helpText: "Back to projects", action: onBack)
+                
+                header
+                
+                if currentProject.isUpcoming {
+                    upcomingNote
                 }
-                .padding(16)
+                
+                progressSection
+                
+                if !currentProject.description.isEmpty {
+                    descriptionSection
+                }
+                
+                milestonesSection
+                alertsSection
+                planSection
+                actionsSection
             }
-            
-            Divider()
-            
-            actionsFooter
+            .padding(20)
         }
         .onAppear {
             dataStore.syncMilestoneAutoComplete(projectId: currentProject.id)
         }
         .sheet(isPresented: $showingEditor) {
             ProjectEditorSheet(project: currentProject)
-                .frame(width: 480, height: 560)
         }
         .sheet(item: $linkingMilestone) { sheet in
             MilestoneGoalPickerSheet(
@@ -79,7 +71,7 @@ struct ProjectDetailView: View {
                 linkId: edit.linkId,
                 initialTarget: edit.initialTarget
             )
-            .frame(width: 320, height: 200)
+            .frame(width: 360, height: 220)
         }
         .sheet(item: $alertEditor) { sheet in
             ProjectAlertEditorSheet(
@@ -93,194 +85,124 @@ struct ProjectDetailView: View {
     // MARK: - Header
     
     private var header: some View {
-        HStack(spacing: 12) {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: currentProject.icon)
+                .font(.title2)
+                .foregroundStyle(currentProject.color)
+                .frame(width: 32, height: 32)
             
-            ZStack {
-                Circle()
-                    .fill(currentProject.color.opacity(0.15))
-                    .frame(width: 36, height: 36)
-                Image(systemName: currentProject.icon)
-                    .font(.system(size: 16))
-                    .foregroundStyle(currentProject.color)
-            }
-            
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(currentProject.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(1)
+                    .font(.headline)
                 
-                HStack(spacing: 8) {
-                    if currentProject.isUpcoming {
-                        Text("Upcoming")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.purple)
-                    } else {
-                        Text(currentProject.status.title)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(currentProject.status.color)
-                    }
-                    
-                    Text("·")
-                        .foregroundStyle(.tertiary)
-                    
-                    if currentProject.isUpcoming {
-                        Text("Starts \(currentProject.startDate, style: .date)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    } else if let deadline = currentProject.targetDate {
-                        Text("Due \(deadline, style: .date)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Started \(currentProject.startDate, style: .date)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(statusLabel)
+                        .font(.subheadline)
+                        .foregroundStyle(statusColor)
+                    if let label = currentProject.deadlineLabel() {
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                        Text(label.text)
+                            .font(.subheadline)
+                            .foregroundStyle(label.color)
                     }
                 }
             }
             
             Spacer()
             
-            Button { showingEditor = true } label: {
-                Image(systemName: "pencil.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.blue.opacity(0.8))
+            Button("Edit") {
+                showingEditor = true
             }
-            .buttonStyle(.plain)
-            .help("Edit project")
+            .buttonStyle(.bordered)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
     }
     
-    // MARK: - Upcoming Banner
-    
-    private var upcomingBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.system(size: 16))
-                .foregroundStyle(.purple)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Starts on \(currentProject.startDate, style: .date)")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Daily-task counting begins on the start date.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.purple.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.purple.opacity(0.2), lineWidth: 1)
-        )
+    private var statusLabel: String {
+        if currentProject.isUpcoming { return "Upcoming" }
+        return currentProject.status.title
     }
     
-    // MARK: - Progress Section
+    private var statusColor: Color {
+        if currentProject.isUpcoming { return .secondary }
+        switch currentProject.status {
+        case .completed: return .green
+        case .paused: return .orange
+        case .archived: return .secondary
+        case .active: return .secondary
+        }
+    }
+    
+    private var upcomingNote: some View {
+        Text("Starts on \(currentProject.startDate, style: .date). Daily-task counting begins then.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+    }
+    
+    // MARK: - Progress
     
     private var progressSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Progress")
+                .font(.headline)
+            
+            if currentProject.isUpcoming {
+                Text("Not started")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(progress.overallProgressPercent)%")
+                    .font(.title2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(currentProject.isCompleted ? .green : .primary)
+            }
+            
+            if currentProject.hasMilestones {
+                Text(
+                    currentProject.isUpcoming
+                        ? "\(progress.totalMilestones) milestones"
+                        : "\(progress.completedMilestones) of \(progress.totalMilestones) milestones"
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Color.primary.opacity(0.08))
-                        .frame(height: 10)
-                    
+                        .frame(height: 6)
                     Capsule()
-                        .fill(currentProject.isCompleted ? Color.green : currentProject.color)
+                        .fill(currentProject.isCompleted ? Color.green : Color.accentColor)
                         .frame(
                             width: geo.size.width * (currentProject.isUpcoming ? 0 : progress.overallProgress),
-                            height: 10
+                            height: 6
                         )
                 }
             }
-            .frame(height: 10)
-            
-            HStack(spacing: 16) {
-                if currentProject.hasMilestones {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Milestones")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                        HStack(spacing: 4) {
-                            Image(systemName: "flag.checkered")
-                                .font(.system(size: 10))
-                            Text(
-                                currentProject.isUpcoming
-                                    ? "\(progress.totalMilestones)"
-                                    : "\(progress.completedMilestones)/\(progress.totalMilestones)"
-                            )
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        }
-                        .foregroundStyle(.green)
-                    }
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Overall")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                    if currentProject.isUpcoming {
-                        Text("—")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("\(progress.overallProgressPercent)%")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(currentProject.isCompleted ? .green : currentProject.color)
-                    }
-                }
-            }
+            .frame(height: 6)
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.primary.opacity(0.03))
-        )
     }
-    
-    // MARK: - Description Section
     
     private var descriptionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Description")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            
+                .font(.headline)
             Text(currentProject.description)
-                .font(.system(size: 13))
-                .foregroundStyle(.primary.opacity(0.9))
+                .font(.body)
         }
     }
     
-    // MARK: - Milestones Section
+    // MARK: - Milestones
     
     private var milestonesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Milestones")
-                    .font(.system(size: 11, weight: .semibold))
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Milestones")
+                .font(.headline)
+            
+            if currentProject.milestones.isEmpty {
+                Text("Break the project into steps. Link a daily task to a milestone to count progress.")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Spacer()
-                if currentProject.hasMilestones && !currentProject.isUpcoming {
-                    Text("\(progress.completedMilestones)/\(progress.totalMilestones) complete")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
             }
             
             ForEach(currentProject.milestones.sorted { $0.order < $1.order }) { milestone in
@@ -335,30 +257,12 @@ struct ProjectDetailView: View {
             }
             
             HStack(spacing: 8) {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.green.opacity(0.6))
-                
-                TextField("Add milestone...", text: $newMilestoneTitle)
-                    .font(.system(size: 12))
-                    .textFieldStyle(.plain)
+                TextField("Add milestone", text: $newMilestoneTitle)
+                    .textFieldStyle(.roundedBorder)
                     .onSubmit { addMilestone() }
-                
-                if !newMilestoneTitle.isEmpty {
-                    Button(action: addMilestone) {
-                        Text("Add")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.green)
-                    }
-                    .buttonStyle(.plain)
-                }
+                Button("Add") { addMilestone() }
+                    .disabled(newMilestoneTitle.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.green.opacity(0.06))
-            )
         }
     }
     
@@ -369,35 +273,24 @@ struct ProjectDetailView: View {
         newMilestoneTitle = ""
     }
     
-    // MARK: - Alerts Section
+    // MARK: - Alerts
     
     private var alertsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Alerts")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.headline)
                 Spacer()
-                Button {
+                Button("Add") {
                     alertEditor = AlertEditorSheet()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "bell.badge")
-                            .font(.system(size: 10))
-                        Text("Add")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(.orange)
                 }
-                .buttonStyle(.plain)
             }
             
             let projectAlerts = currentProject.projectScopedAlerts
             if projectAlerts.isEmpty {
-                Text("No project alerts. Add hourly, daily, or deadline reminders.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .padding(.vertical, 4)
+                Text("Hourly, daily, or deadline reminders for this project.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             } else {
                 ForEach(projectAlerts) { alert in
                     ProjectAlertRow(
@@ -418,129 +311,75 @@ struct ProjectDetailView: View {
         }
     }
     
-    // MARK: - Plan Section
+    // MARK: - Plan
     
     private var planSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Plan & Notes")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                Text("Plan")
+                    .font(.headline)
                 Spacer()
-                Button {
+                Button(showPlanEditor ? "Done" : "Edit") {
                     showPlanEditor.toggle()
-                } label: {
-                    Text(showPlanEditor ? "Done" : "Edit")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.blue)
                 }
-                .buttonStyle(.plain)
             }
             
             if showPlanEditor {
-                planEditorView
-            } else {
-                planPreviewView
-            }
-        }
-    }
-    
-    private var planEditorView: some View {
-        VStack(spacing: 0) {
-            TextEditor(text: Binding(
-                get: { currentProject.plan },
-                set: { newValue in
-                    var updated = currentProject
-                    updated.plan = newValue
-                    dataStore.updateProject(updated)
-                }
-            ))
-            .font(.system(size: 12, design: .monospaced))
-            .frame(minHeight: 120)
-            .scrollContentBackground(.hidden)
-            .padding(8)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.primary.opacity(0.03))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-        )
-    }
-    
-    private var planPreviewView: some View {
-        Group {
-            if currentProject.plan.isEmpty {
-                Text("No plan or notes yet. Tap Edit to add.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
+                TextEditor(text: Binding(
+                    get: { currentProject.plan },
+                    set: { newValue in
+                        var updated = currentProject
+                        updated.plan = newValue
+                        dataStore.updateProject(updated)
+                    }
+                ))
+                .font(.body)
+                .frame(minHeight: 120)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+            } else if currentProject.plan.isEmpty {
+                Text("No plan yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             } else {
                 Text(JournalMarkdown.plainText(from: currentProject.plan))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.primary.opacity(0.85))
+                    .font(.body)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.primary.opacity(0.02))
-        )
     }
     
-    // MARK: - Actions Footer
+    // MARK: - Actions
     
-    private var actionsFooter: some View {
+    private var actionsSection: some View {
         HStack(spacing: 12) {
             if currentProject.isCompleted {
-                Button {
+                Button("Reopen") {
                     dataStore.reopenProject(currentProject.id)
-                } label: {
-                    Label("Reopen", systemImage: "arrow.uturn.left")
-                        .font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
             } else if currentProject.isPaused {
-                Button {
+                Button("Resume") {
                     dataStore.reopenProject(currentProject.id)
-                } label: {
-                    Label("Resume", systemImage: "play.fill")
-                        .font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
             } else if !currentProject.isUpcoming {
-                Button {
+                Button("Pause") {
                     dataStore.pauseProject(currentProject.id)
-                } label: {
-                    Label("Pause", systemImage: "pause.fill")
-                        .font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.orange)
             }
             
             Spacer()
             
             if !currentProject.isCompleted {
-                Button {
+                Button("Mark Complete") {
                     dataStore.completeProject(currentProject.id)
-                    dismiss()
-                } label: {
-                    Label("Mark Complete", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 11, weight: .medium))
+                    onBack()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
             }
         }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
+        .padding(.top, 8)
     }
 }
 
@@ -579,7 +418,7 @@ struct ProjectAlertRow: View {
         HStack(spacing: 10) {
             Button(action: onToggle) {
                 Image(systemName: alert.isEnabled ? "bell.fill" : "bell.slash")
-                    .font(.system(size: 12))
+                    .font(.body)
                     .foregroundStyle(alert.isEnabled ? .orange : .secondary)
             }
             .buttonStyle(.plain)
@@ -587,39 +426,24 @@ struct ProjectAlertRow: View {
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(alert.displayTitle(project: project))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.body)
                     .lineLimit(1)
                 Text(alert.schedule.summary)
-                    .font(.system(size: 10))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             
             Spacer()
             
             Text(alert.sound.title)
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             
-            Button(action: onEdit) {
-                Image(systemName: "pencil")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.blue)
-            }
-            .buttonStyle(.plain)
-            
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.red.opacity(0.7))
-            }
-            .buttonStyle(.plain)
+            Button("Edit", action: onEdit)
+            Button("Delete", role: .destructive, action: onDelete)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.orange.opacity(alert.isEnabled ? 0.08 : 0.03))
-        )
+        .padding(.vertical, 4)
+        .frame(minHeight: 44)
         .opacity(alert.isEnabled ? 1 : 0.6)
     }
 }
@@ -643,68 +467,54 @@ struct MilestoneDetailCard: View {
     let onToggleAlert: (UUID) -> Void
     let onDeleteAlert: (UUID) -> Void
     
-    @State private var isHovered = false
-    
     private var isComplete: Bool {
         detail?.isEffectivelyComplete ?? milestone.isCompleted
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Button(action: onToggle) {
                     Image(systemName: isComplete ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 16))
-                        .foregroundStyle(isComplete ? .green : .gray.opacity(0.4))
+                        .font(.title3)
+                        .foregroundStyle(isComplete ? .green : .secondary)
                 }
                 .buttonStyle(.plain)
                 .help("Toggle complete")
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(milestone.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.body)
                         .strikethrough(isComplete, color: .secondary)
                         .foregroundStyle(isComplete ? .secondary : .primary)
                         .lineLimit(1)
                     
                     if let detail, detail.targetsTotalCount > 0, project.hasStarted {
-                        Text("\(detail.targetsMetCount)/\(detail.targetsTotalCount) targets met")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
+                        Text("\(detail.targetsMetCount) of \(detail.targetsTotalCount) targets met")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else if milestone.hasLinkedGoals {
                         Text("\(milestone.linkedGoals.count) linked task\(milestone.linkedGoals.count == 1 ? "" : "s")")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 
                 Spacer()
                 
-                if !milestoneAlerts.isEmpty {
-                    HStack(spacing: 2) {
-                        Image(systemName: "bell.fill")
-                            .font(.system(size: 9))
-                        Text("\(milestoneAlerts.count)")
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(.orange)
-                }
-                
-                if isHovered {
-                    Button(action: onDelete) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.red.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
-                }
-                
                 if let date = milestone.completedAt, isComplete {
                     Text(date, style: .date)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Delete milestone")
             }
+            .frame(minHeight: 44)
             
             ForEach(milestone.linkedGoals) { link in
                 linkedGoalRow(link)
@@ -721,46 +531,11 @@ struct MilestoneDetailCard: View {
             }
             
             HStack(spacing: 8) {
-                Button(action: onAddGoal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "link.badge.plus")
-                            .font(.system(size: 11))
-                        Text("Link daily task")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(.blue)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                
-                Button(action: onAddAlert) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bell.badge")
-                            .font(.system(size: 11))
-                        Text("Alert")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
+                Button("Link daily task", action: onAddGoal)
+                Button("Alert", action: onAddAlert)
             }
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isComplete ? Color.green.opacity(0.06) : Color.primary.opacity(0.03))
-        )
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
+        .padding(.vertical, 4)
     }
     
     @ViewBuilder
@@ -770,17 +545,14 @@ struct MilestoneDetailCard: View {
         
         HStack(spacing: 8) {
             if let goal {
-                GoalIconView(icon: goal.icon, size: 10, isActive: goal.isActive)
+                GoalIconView(icon: goal.icon, size: 12, isActive: goal.isActive)
                 Text(goal.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.body)
                     .lineLimit(1)
             } else {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                Text("Missing goal")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                Text("Missing task")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()
@@ -788,44 +560,27 @@ struct MilestoneDetailCard: View {
             if project.hasStarted {
                 if let target = link.targetCount, target > 0 {
                     Text(formatCount(count) + "/\(target)")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(count + 0.0001 >= Double(target) ? .green : .blue)
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(count + 0.0001 >= Double(target) ? .green : .secondary)
                 } else {
                     Text(formatCount(count))
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             } else if let target = link.targetCount, target > 0 {
                 Text("Target \(target)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-            
-            Button {
-                onEditTarget(link)
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 10))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .help("Set optional target")
             
-            Button {
-                onRemoveLink(link.id)
-            } label: {
-                Image(systemName: "minus.circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.red.opacity(0.5))
+            Button("Target") {
+                onEditTarget(link)
             }
-            .buttonStyle(.plain)
+            Button("Remove", role: .destructive) {
+                onRemoveLink(link.id)
+            }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.blue.opacity(0.05))
-        )
+        .frame(minHeight: 44)
     }
     
     private func formatCount(_ value: Double) -> String {
@@ -850,60 +605,50 @@ struct MilestoneGoalPickerSheet: View {
         VStack(spacing: 0) {
             HStack {
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Text("Link Daily Task")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.headline)
                 Spacer()
-                Color.clear.frame(width: 44, height: 1)
+                    .frame(width: 60)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             
             Divider()
             
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    let available = dataStore.goals.filter { $0.isActive && !alreadyLinked.contains($0.id) }
-                    if available.isEmpty {
-                        Text("No more daily tasks to link.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                            .padding(24)
-                    } else {
-                        ForEach(available) { goal in
-                            Button {
-                                dataStore.addGoalLink(
-                                    to: projectId,
-                                    milestoneId: milestoneId,
-                                    goalId: goal.id
-                                )
-                                dismiss()
-                            } label: {
-                                HStack(spacing: 10) {
-                                    GoalIconView(icon: goal.icon, size: 12, isActive: true)
-                                    Text(goal.title)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Image(systemName: "plus.circle.fill")
-                                        .foregroundStyle(.blue)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.primary.opacity(0.03))
-                                )
-                                .contentShape(Rectangle())
+            List {
+                let available = dataStore.goals.filter { $0.isActive && !alreadyLinked.contains($0.id) }
+                if available.isEmpty {
+                    Text("No more daily tasks to link.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(available) { goal in
+                        Button {
+                            dataStore.addGoalLink(
+                                to: projectId,
+                                milestoneId: milestoneId,
+                                goalId: goal.id
+                            )
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 10) {
+                                GoalIconView(icon: goal.icon, size: 14, isActive: true)
+                                Text(goal.title)
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Spacer()
                             }
-                            .buttonStyle(.plain)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .padding(16)
             }
+            .listStyle(.inset)
         }
     }
 }
@@ -923,38 +668,32 @@ struct MilestoneTargetEditorSheet: View {
     @State private var targetValue = 30
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Task Target")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.headline)
             
             Toggle("Set target count", isOn: $hasTarget)
-                .toggleStyle(.switch)
-                .controlSize(.small)
             
             if hasTarget {
                 HStack {
                     Text("Target")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
                     TextField("", value: $targetValue, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 80)
                     Text("completions")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
             }
             
             Text("Partial days count as 0.5. Leave off to track without a target.")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             
             HStack {
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") {
                     dataStore.updateGoalLinkTarget(
@@ -965,8 +704,8 @@ struct MilestoneTargetEditorSheet: View {
                     )
                     dismiss()
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
@@ -995,7 +734,7 @@ struct MilestoneTargetEditorSheet: View {
     )
     store.addProject(project)
     
-    return ProjectDetailView(project: project)
+    return ProjectDetailView(project: project, onBack: {})
         .environment(store)
-        .frame(width: 480, height: 600)
+        .frame(width: 560, height: 600)
 }

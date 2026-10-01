@@ -270,9 +270,9 @@ struct UsageProgress {
             : AppTimeFormatting.duration(seconds: used)
         var parts = [usedText]
         if mustOpenOnce && minMinutes == 0 {
-            parts.append("goal: once")
+            parts.append("minimum: once")
         } else if minMinutes > 0 {
-            parts.append("goal \(AppTimeFormatting.minutes(minMinutes))")
+            parts.append("minimum \(AppTimeFormatting.minutes(minMinutes))")
         }
         if maxMinutes > 0 {
             parts.append("cap \(AppTimeFormatting.minutes(maxMinutes))")

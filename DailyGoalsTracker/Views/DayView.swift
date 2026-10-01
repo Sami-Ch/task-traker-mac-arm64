@@ -7,6 +7,7 @@ struct DayView: View {
     @Binding var selectedDate: Date
     
     @State private var showingOneOff = false
+    @State private var editingOneOff: Goal?
     
     private var presentation: CalendarPresentation {
         dataStore.calendarPresentation
@@ -56,23 +57,23 @@ struct DayView: View {
             Divider().padding(.horizontal)
             
             HStack(spacing: 8) {
-                MiniProgressRing(progress: summary.completionPercentage, size: 14)
+                MiniProgressRing(progress: summary.completionPercentage, size: 16)
                 Text("\(Int(summary.completionPercentage * 100))%")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
                 if summary.isSpecialDay {
                     Image(systemName: summary.dayMode.icon)
-                        .font(.system(size: 9))
+                        .font(.caption)
                         .foregroundStyle(summary.dayMode.color)
                 }
-                HStack(spacing: 8) {
-                    compactStat(count: summary.doneCount, color: .green)
-                    compactStat(count: summary.partialCount, color: .orange)
-                    compactStat(count: summary.notDoneCount, color: .gray)
+                HStack(spacing: 10) {
+                    labeledStat(count: summary.doneCount, label: "Done", color: .green)
+                    labeledStat(count: summary.partialCount, label: "Part", color: .orange)
+                    labeledStat(count: summary.notDoneCount, label: "Miss", color: .red)
                 }
                 Spacer(minLength: 0)
                 if isHistory {
                     Text("History")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                         .help("This day's list is saved. You can still add or remove tasks; the weekly template will not rewrite it.")
                 }
@@ -89,7 +90,11 @@ struct DayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $showingOneOff) {
             OneOffTaskSheet(date: selectedDate)
-                .frame(width: 360, height: 280)
+                .frame(width: 360, height: 320)
+        }
+        .sheet(item: $editingOneOff) { goal in
+            OneOffTaskSheet(date: selectedDate, existing: goal)
+                .frame(width: 360, height: 320)
         }
     }
     
@@ -103,16 +108,25 @@ struct DayView: View {
                 ForEach(dayGoals.tracked) { goal in
                     let entry = dataStore.getEntry(for: goal.id, on: selectedDate)
                     let oneOff = dataStore.isOneOff(goal.id, on: selectedDate)
-                    GoalRow(goal: goal, entry: entry, isOneOff: oneOff) {
+                    GoalRow(goal: goal, entry: entry, isOneOff: oneOff, onEdit: oneOff ? { editingOneOff = goal } : nil) {
                         dataStore.cycleStatus(for: goal.id, on: selectedDate)
                     }
                     .contextMenu {
-                        Button("Edit Goal…") {
-                            settingsRouter.editGoal(goal.id)
-                            NotificationCenter.default.post(name: .openSettingsWindow, object: nil)
-                        }
-                        Button(oneOff ? "Remove one-off" : "Hide from this day") {
-                            dataStore.hideGoal(goal.id, on: selectedDate)
+                        if oneOff {
+                            Button("Edit…") {
+                                editingOneOff = goal
+                            }
+                            Button("Delete", role: .destructive) {
+                                dataStore.deleteOneOffTask(goal.id, on: selectedDate)
+                            }
+                        } else {
+                            Button("Edit Task…") {
+                                settingsRouter.editGoal(goal.id)
+                                NotificationCenter.default.post(name: .openSettingsWindow, object: nil)
+                            }
+                            Button("Hide from this day") {
+                                dataStore.hideGoal(goal.id, on: selectedDate)
+                            }
                         }
                     }
                 }
@@ -134,14 +148,14 @@ struct DayView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "plus.circle")
-                            .font(.system(size: 11))
+                            .font(.body)
                         Text("Add for this day")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.subheadline.weight(.medium))
                         Spacer()
                     }
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.accentColor)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
                     .contentShape(Rectangle())
                 }
                 .menuStyle(.borderlessButton)
@@ -155,11 +169,14 @@ struct DayView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
     
-    private func compactStat(count: Int, color: Color) -> some View {
-        HStack(spacing: 3) {
+    private func labeledStat(count: Int, label: String, color: Color) -> some View {
+        HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
             Text("\(count)")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(.caption.weight(.semibold).monospacedDigit())
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -169,6 +186,7 @@ private struct OneOffTaskSheet: View {
     @Environment(\.dismiss) private var dismiss
     
     let date: Date
+    var existing: Goal? = nil
     
     @State private var title = ""
     @State private var icon = "star.fill"
@@ -179,19 +197,20 @@ private struct OneOffTaskSheet: View {
         "book.fill", "heart.fill", "leaf.fill", "lightbulb.fill"
     ]
     
+    private var isEditing: Bool { existing != nil }
+    
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
-                Text("One-off task")
-                    .font(.system(size: 14, weight: .semibold))
+                Text(isEditing ? "Edit one-off" : "One-off task")
+                    .font(.headline)
                 Spacer()
-                Button("Add") { save() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.blue)
+                Button(isEditing ? "Save" : "Add") { save() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.horizontal, 16)
@@ -201,7 +220,7 @@ private struct OneOffTaskSheet: View {
             
             VStack(alignment: .leading, spacing: 12) {
                 Text("Only this day — not added to the library.")
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                 
                 TextField("What do you need to do?", text: $title)
@@ -223,15 +242,35 @@ private struct OneOffTaskSheet: View {
                         .buttonStyle(.plain)
                     }
                 }
+                
+                if isEditing {
+                    Button("Delete", role: .destructive) {
+                        if let existing {
+                            dataStore.deleteOneOffTask(existing.id, on: date)
+                        }
+                        dismiss()
+                    }
+                    .padding(.top, 4)
+                }
             }
             .padding(16)
             
             Spacer()
         }
+        .onAppear {
+            if let existing {
+                title = existing.title
+                icon = existing.icon
+            }
+        }
     }
     
     private func save() {
-        dataStore.addOneOffTask(title: title, icon: icon, on: date)
+        if let existing {
+            dataStore.updateOneOffTask(existing.id, title: title, icon: icon, on: date)
+        } else {
+            dataStore.addOneOffTask(title: title, icon: icon, on: date)
+        }
         dismiss()
     }
 }

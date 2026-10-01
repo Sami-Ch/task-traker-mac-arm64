@@ -198,6 +198,7 @@ private struct CalendarDayCell: View {
                 }
             }
             .frame(height: 36)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(dayHelp)

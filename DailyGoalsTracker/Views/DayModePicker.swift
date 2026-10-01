@@ -35,9 +35,9 @@ struct DayModePicker: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: mode.icon)
-                    .font(.system(size: 9))
+                    .font(.caption)
                 Text(mode.shortTitle)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.caption.weight(.medium))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -58,17 +58,17 @@ struct DayModePicker: View {
         
         return HStack(spacing: 6) {
             Image(systemName: currentMode.icon)
-                .font(.system(size: 9))
+                .font(.caption)
                 .foregroundStyle(currentMode.color)
             Text(trackedCount == 0
-                 ? "No goals selected for \(currentMode.title)"
-                 : "\(trackedCount) goal\(trackedCount == 1 ? "" : "s") for \(currentMode.title)")
-                .font(.system(size: 10))
+                 ? "No tasks selected for \(currentMode.title)"
+                 : "\(trackedCount) task\(trackedCount == 1 ? "" : "s") for \(currentMode.title)")
+                .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             if skippedCount > 0 {
                 Text("\(skippedCount) skipped")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -91,14 +91,14 @@ struct SkippedGoalsSection: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "moon.zzz.fill")
-                            .font(.system(size: 10))
+                            .font(.caption)
                             .foregroundStyle(.tertiary)
-                        Text("\(goals.count) goals skipped today")
-                            .font(.system(size: 11))
+                        Text("\(goals.count) tasks skipped today")
+                            .font(.caption)
                             .foregroundStyle(.tertiary)
                         Spacer()
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9))
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.horizontal, 12)
@@ -113,7 +113,7 @@ struct SkippedGoalsSection: View {
                             HStack(spacing: 8) {
                                 GoalIconView(icon: goal.icon, size: 10, isActive: false)
                                 Text(goal.title)
-                                    .font(.system(size: 11))
+                                    .font(.caption)
                                     .foregroundStyle(.tertiary)
                                     .strikethrough(true, color: Color.secondary.opacity(0.5))
                                 Spacer()

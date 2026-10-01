@@ -103,17 +103,17 @@ struct ScheduleSettingsPanel: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
             
-            Text("Tap a day to include or skip that goal. Frozen past days stay as they were.")
+            Text("Tap a day to include or skip that task. Frozen past days stay as they were.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             
             if dataStore.goals.isEmpty {
-                Text("Add goals in the Goals panel first.")
+                Text("Add tasks in the Tasks panel first.")
                     .font(.system(size: 12))
                     .foregroundStyle(.tertiary)
             } else {
                 HStack(spacing: 0) {
-                    Text("Goal")
+                    Text("Task")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)

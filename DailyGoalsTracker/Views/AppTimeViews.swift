@@ -37,7 +37,7 @@ struct AppTimeSettingsPanel: View {
                 .foregroundStyle(.orange)
             Text("No usage rules yet")
                 .font(.system(size: 14, weight: .semibold))
-            Text("Add an app or website, then set a daily goal (at least 20 minutes, or open once) and/or a cap.")
+            Text("Add an app or website, then set a daily minimum (at least 20 minutes, or open once) and/or a cap.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -298,7 +298,7 @@ private struct TimeLimitRowChrome<Icon: View>: View {
                 .tint(progress.isOverMax ? .red : ((progress.hasCap || progress.isMinMet) ? .green : (progress.barProgress > 0.8 ? .orange : .blue)))
             
             HStack {
-                Text("Goal")
+                Text("Minimum")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                 Spacer()
@@ -412,7 +412,7 @@ struct AddAppLimitSheet: View {
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(.primary)
                             Spacer()
-                            Text("Set goal")
+                            Text("Set minimum")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.tertiary)
                             Image(systemName: "plus.circle.fill")
@@ -425,7 +425,7 @@ struct AddAppLimitSheet: View {
                 .listStyle(.plain)
             }
             
-            Text("Then set a Goal (at least 20 minutes, or Once) and/or a Cap in the list. This app is in the list if you want a once-a-day check-in.")
+            Text("Then set a minimum (at least 20 minutes, or Once) and/or a Cap in the list. This app is in the list if you want a once-a-day check-in.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .padding(12)
@@ -493,7 +493,7 @@ struct AddWebsiteLimitSheet: View {
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(.primary)
                             Spacer()
-                            Text("Set goal")
+                            Text("Set minimum")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.tertiary)
                             Image(systemName: "plus.circle.fill")
@@ -506,7 +506,7 @@ struct AddWebsiteLimitSheet: View {
                 .listStyle(.plain)
             }
             
-            Text("Set a Goal and/or Cap after adding. Works in Zen, Safari, Chrome, Brave, Edge, and Arc. Full page addresses are not stored.")
+            Text("Set a minimum and/or Cap after adding. Works in Zen, Safari, Chrome, Brave, Edge, and Arc. Full page addresses are not stored.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .padding(12)
@@ -665,7 +665,7 @@ private struct UsageGoalRow: View {
                 isHovered = hovering
             }
         }
-        .help("Goals turn green when you hit the minimum. Caps stay green until you go over.")
+        .help("Minimums turn green when you hit them. Caps stay green until you go over.")
     }
 }
 

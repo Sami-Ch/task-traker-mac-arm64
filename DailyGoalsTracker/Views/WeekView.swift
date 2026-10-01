@@ -63,7 +63,7 @@ struct WeekView: View {
         ScrollView {
             LazyVStack(spacing: 3) {
                 if weekGoals.isEmpty {
-                    Text("No goals this week")
+                    Text("No tasks this week")
                         .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -89,7 +89,7 @@ struct WeekView: View {
     
     private var compactDayHeaders: some View {
         HStack(spacing: 0) {
-            Text("Goal")
+            Text("Task")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)

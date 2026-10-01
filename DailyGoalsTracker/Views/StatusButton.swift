@@ -29,6 +29,7 @@ struct StatusButton: View {
                     .foregroundStyle(status.color)
                     .contentTransition(.symbolEffect(.replace))
             }
+            .contentShape(Circle())
         }
         .buttonStyle(StatusButtonStyle())
         .accessibilityLabel(status.accessibilityLabel)

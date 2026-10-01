@@ -57,6 +57,12 @@
 		A1000055 /* ProjectAlertService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000055; };
 		A1000056 /* ProjectAlertEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000056; };
 		A1000057 /* alert.aiff in Resources */ = {isa = PBXBuildFile; fileRef = A2000057; };
+		A1000060 /* PeriodReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000060; };
+		A1000061 /* PeriodReportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000061; };
+		A1000062 /* ReportsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000062; };
+		A1000064 /* SuggestAISettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000064; };
+		A1000065 /* ProjectsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000065; };
+		A1000063 /* FoundationModels.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000063; settings = {ATTRIBUTES = (Weak, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -112,6 +118,12 @@
 		A2000055 /* ProjectAlertService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectAlertService.swift; sourceTree = "<group>"; };
 		A2000056 /* ProjectAlertEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectAlertEditorSheet.swift; sourceTree = "<group>"; };
 		A2000057 /* alert.aiff */ = {isa = PBXFileReference; lastKnownFileType = audio.aiff; path = alert.aiff; sourceTree = "<group>"; };
+		A2000060 /* PeriodReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeriodReport.swift; sourceTree = "<group>"; };
+		A2000061 /* PeriodReportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeriodReportService.swift; sourceTree = "<group>"; };
+		A2000062 /* ReportsSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportsSettingsPane.swift; sourceTree = "<group>"; };
+		A2000064 /* SuggestAISettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestAISettingsPane.swift; sourceTree = "<group>"; };
+		A2000065 /* ProjectsSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsSettingsPane.swift; sourceTree = "<group>"; };
+		A2000063 /* FoundationModels.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FoundationModels.framework; path = System/Library/Frameworks/FoundationModels.framework; sourceTree = SDKROOT; };
 		A3000001 /* DailyGoalsTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyGoalsTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -120,6 +132,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000063 /* FoundationModels.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +144,7 @@
 			children = (
 				A5000002 /* DailyGoalsTracker */,
 				A5000006 /* Products */,
+				A5000011 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -168,6 +182,7 @@
 				A2000033 /* DaySnapshot.swift */,
 				A2000034 /* TrackerSettings.swift */,
 				A2000035 /* CalendarPresentation.swift */,
+				A2000060 /* PeriodReport.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -186,6 +201,7 @@
 				A2000025 /* PrayerService.swift */,
 				A2000030 /* AppUsageService.swift */,
 				A2000055 /* ProjectAlertService.swift */,
+				A2000061 /* PeriodReportService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -228,6 +244,9 @@
 				A2000044 /* ModesSettingsPane.swift */,
 				A2000045 /* PrayerSettingsPane.swift */,
 				A2000046 /* AppTimeSettingsPane.swift */,
+				A2000062 /* ReportsSettingsPane.swift */,
+				A2000064 /* SuggestAISettingsPane.swift */,
+				A2000065 /* ProjectsSettingsPane.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -255,6 +274,14 @@
 				A2000057 /* alert.aiff */,
 			);
 			path = Sounds;
+			sourceTree = "<group>";
+		};
+		A5000011 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A2000063 /* FoundationModels.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -375,6 +402,11 @@
 				A1000054 /* ProjectAlert.swift in Sources */,
 				A1000055 /* ProjectAlertService.swift in Sources */,
 				A1000056 /* ProjectAlertEditorSheet.swift in Sources */,
+				A1000060 /* PeriodReport.swift in Sources */,
+				A1000061 /* PeriodReportService.swift in Sources */,
+				A1000062 /* ReportsSettingsPane.swift in Sources */,
+				A1000064 /* SuggestAISettingsPane.swift in Sources */,
+				A1000065 /* ProjectsSettingsPane.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

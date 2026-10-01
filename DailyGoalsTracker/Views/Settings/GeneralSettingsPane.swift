@@ -12,7 +12,7 @@ struct GeneralSettingsPane: View {
                         .frame(width: 64, height: 64)
                     
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Daily Goals Tracker")
+                        Text("Daily Tasks")
                             .font(.title2.weight(.semibold))
                         Text("Version \(appVersion)")
                             .font(.caption)
@@ -44,7 +44,7 @@ struct GeneralSettingsPane: View {
             }
             
             Section("Data") {
-                LabeledContent("Goals") {
+                LabeledContent("Tasks") {
                     Text("\(dataStore.goals.count) total")
                         .foregroundStyle(.secondary)
                 }

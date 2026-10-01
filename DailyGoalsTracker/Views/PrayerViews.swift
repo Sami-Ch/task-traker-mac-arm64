@@ -192,13 +192,14 @@ struct NextPrayerBanner: View {
         if prayer.isEnabled, let next = prayer.nextPrayer {
             HStack(spacing: 8) {
                 Image(systemName: next.name.icon)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.indigo)
-                Text("Next: \(next.name.rawValue)")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(Self.timeFormatter.string(from: next.date))
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                Text("Next: \(next.name.rawValue)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(Self.timeFormatter.string(from: next.date))
+                    .font(.caption.weight(.medium).monospacedDigit())
+                    .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
                 if prayer.isLoading {
                     ProgressView()
@@ -206,8 +207,7 @@ struct NextPrayerBanner: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color.indigo.opacity(0.08))
+            .padding(.vertical, 4)
         }
     }
 }

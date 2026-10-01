@@ -188,6 +188,30 @@ struct CalendarPresentation {
         monthGridDays(containing: date).compactMap { $0 }
     }
     
+    /// Inclusive civil dates for the week immediately before the week containing `date`.
+    func previousCompletedWeek(relativeTo date: Date) -> (start: Date, end: Date)? {
+        let thisWeekStart = weekStart(containing: date)
+        let prevStart = shiftedWeek(thisWeekStart, by: -1)
+        let prevEnd = shiftedDay(thisWeekStart, by: -1)
+        guard prevStart <= prevEnd else { return nil }
+        return (prevStart, prevEnd)
+    }
+    
+    /// Inclusive civil dates and display title for the month immediately before the month containing `date`.
+    func previousCompletedMonth(relativeTo date: Date) -> (start: Date, end: Date, title: String)? {
+        let calendar = mode == .hijri ? hijriCalendar : gregorianCalendar
+        let comps = calendar.dateComponents([.year, .month], from: date)
+        guard let thisMonthStart = calendar.date(from: DateComponents(year: comps.year, month: comps.month, day: 1)),
+              let prevMonthStart = calendar.date(byAdding: .month, value: -1, to: thisMonthStart),
+              let prevMonthEnd = calendar.date(byAdding: .day, value: -1, to: thisMonthStart)
+        else { return nil }
+        
+        let start = GoalEntry.startOfCivilDay(for: prevMonthStart)
+        let end = GoalEntry.startOfCivilDay(for: prevMonthEnd)
+        guard start <= end else { return nil }
+        return (start, end, monthTitle(for: prevMonthStart))
+    }
+    
     // MARK: - Names
     
     enum WeekdayNameStyle {

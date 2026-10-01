@@ -1,13 +1,19 @@
 import SwiftUI
 
-/// Main view displayed in the menu bar popover
+/// Fill for the menu-bar panel. Near-black, matching Cursor’s menu.
+enum PanelChrome {
+    static let background = Color(red: 0.09, green: 0.09, blue: 0.10)
+    static let cornerRadius: CGFloat = 12
+    static let width: CGFloat = 400
+    static let height: CGFloat = 600
+}
+
+/// Main view displayed in the menu bar panel.
 struct PopoverView: View {
     @Environment(DataStore.self) private var dataStore
     
     @State private var selectedTab: ViewTab = .day
     @State private var selectedDate = Date()
-    @State private var showingAddGoal = false
-    @State private var editingGoal: Goal?
     
     enum ViewTab: String, CaseIterable {
         case day = "Day"
@@ -27,18 +33,19 @@ struct PopoverView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            mainContent
+            topBar
+            tabPicker
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            tabContent
         }
-        .frame(width: 400, height: 600)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(isPresented: $showingAddGoal) {
-            GoalEditorSheet(goal: nil)
-                .frame(width: 400, height: 520)
-        }
-        .sheet(item: $editingGoal) { goal in
-            GoalEditorSheet(goal: goal)
-                .frame(width: 400, height: 520)
-        }
+        .frame(width: PanelChrome.width, height: PanelChrome.height)
+        .background(PanelChrome.background)
+        .clipShape(RoundedRectangle(cornerRadius: PanelChrome.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: PanelChrome.cornerRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
         .onReceive(NotificationCenter.default.publisher(for: .resetPopoverToToday)) { _ in
             dataStore.ensureDaySnapshotsCurrent()
             selectedDate = dataStore.logicalDate()
@@ -50,25 +57,8 @@ struct PopoverView: View {
         }
     }
     
-    // MARK: - Main Content
-    private var mainContent: some View {
-        VStack(spacing: 0) {
-            // Top bar with settings
-            topBar
-            
-            // Tab picker
-            tabPicker
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-            
-            // Content based on selected tab
-            tabContent
-        }
-    }
-    
     // MARK: - Top Bar
-    /// Three independent layers so the centered streak badge can never push the
-    /// leading label or trailing gear around when it appears or disappears.
+    
     private var topBar: some View {
         ZStack {
             leadingLabel
@@ -79,85 +69,64 @@ struct PopoverView: View {
             settingsButton
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 36)
+        .padding(.horizontal, 14)
+        .frame(height: 40)
     }
     
     private var leadingLabel: some View {
         Group {
             if selectedTab == .projects {
-                HStack(spacing: 4) {
-                    Image(systemName: "flag.fill")
-                        .font(.system(size: 11))
-                    Text("\(dataStore.activeProjects.count) Active")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .foregroundStyle(.purple)
+                Text("\(dataStore.activeProjects.count) Active")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             } else {
                 Button {
                     selectedDate = dataStore.logicalDate()
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 11))
-                        Text("Today")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundStyle(.blue)
-                    .contentShape(Rectangle())
+                    Text("Today")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 6)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .opacity(dataStore.isLogicalToday(selectedDate) ? 0.3 : 1)
+                .foregroundStyle(dataStore.isLogicalToday(selectedDate) ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.accentColor))
                 .disabled(dataStore.isLogicalToday(selectedDate))
             }
         }
         .fixedSize()
     }
     
-    /// Constant-size slot: the container always exists, only its contents fade in.
     private var streakSlot: some View {
         let streak = selectedTab == .projects ? 0 : dataStore.getCurrentStreak()
-        
-        return Color.clear
-            .frame(width: 60, height: 24)
-            .overlay {
-                HStack(spacing: 4) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.orange)
-                    Text("\(streak)")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(Color.orange.opacity(0.15)))
-                .fixedSize()
-                .opacity(streak > 0 ? 1 : 0)
-            }
-            .allowsHitTesting(false)
+        return HStack(spacing: 4) {
+            Image(systemName: "flame.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("\(streak)")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .opacity(streak > 0 ? 1 : 0)
+        .allowsHitTesting(false)
     }
     
     private var settingsButton: some View {
         Button {
-            openSettings()
+            NotificationCenter.default.post(name: .openSettingsWindow, object: nil)
         } label: {
             Image(systemName: "gearshape")
-                .font(.system(size: 14))
+                .font(.body)
                 .foregroundStyle(.secondary)
-                .frame(width: 32, height: 32)
+                .frame(width: 36, height: 36)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Settings (⌘,)")
     }
     
-    private func openSettings() {
-        // Menu bar apps can't reliably open SwiftUI's Settings scene;
-        // AppDelegate owns a real NSWindow instead.
-        NotificationCenter.default.post(name: .openSettingsWindow, object: nil)
-    }
-    
     // MARK: - Tab Picker
+    
     private var tabPicker: some View {
         HStack(spacing: 2) {
             ForEach(ViewTab.allCases, id: \.rawValue) { tab in
@@ -166,17 +135,17 @@ struct PopoverView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: tab.icon)
-                            .font(.system(size: 10))
+                            .font(.caption)
                         Text(tab.rawValue)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.subheadline.weight(.medium))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 7)
                     .foregroundStyle(selectedTab == tab ? .white : .secondary)
                     .background {
                         if selectedTab == tab {
                             Capsule()
-                                .fill(tab == .projects ? Color.purple : Color.blue)
+                                .fill(Color.accentColor)
                         }
                     }
                     .contentShape(Capsule())
@@ -185,13 +154,9 @@ struct PopoverView: View {
             }
         }
         .padding(3)
-        .background(
-            Capsule()
-                .fill(Color.gray.opacity(0.15))
-        )
+        .background(Capsule().fill(Color.white.opacity(0.08)))
     }
     
-    // MARK: - Tab Content
     @ViewBuilder
     private var tabContent: some View {
         Group {
@@ -214,8 +179,6 @@ struct PopoverView: View {
     }
 }
 
-
-// MARK: - Preview
 #Preview("Popover View") {
     PopoverView()
         .environment(DataStore())

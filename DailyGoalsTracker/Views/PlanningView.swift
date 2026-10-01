@@ -182,7 +182,7 @@ struct PlanningSection: View {
                 .font(.system(size: 14))
                 .foregroundStyle(horizon.color.opacity(0.6))
             
-            TextField("Add a goal...", text: $newGoalText)
+            TextField("Add a task...", text: $newGoalText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .onSubmit(onAddGoal)
@@ -286,7 +286,7 @@ struct PlanningGoalEditor: View {
                 
                 Spacer()
                 
-                Text("Edit Goal")
+                Text("Edit Task")
                     .font(.system(size: 13, weight: .semibold))
                 
                 Spacer()
@@ -302,7 +302,7 @@ struct PlanningGoalEditor: View {
             Divider()
             
             VStack(spacing: 12) {
-                TextField("Goal title", text: $title)
+                TextField("Task title", text: $title)
                     .textFieldStyle(.roundedBorder)
                 
                 TextField("Notes (optional)", text: $notes, axis: .vertical)

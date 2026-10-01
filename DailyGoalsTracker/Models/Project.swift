@@ -264,6 +264,71 @@ struct Project: Identifiable, Equatable, Hashable {
             .first
     }
     
+    // MARK: - Deadline Label
+    
+    /// Shared deadline / completion line for list cards and detail headers.
+    struct DeadlineLabel: Equatable {
+        let text: String
+        let color: Color
+    }
+    
+    /// Civil-day status relative to `targetDate`, preferring completion over overdue.
+    func deadlineLabel(relativeTo now: Date = Date()) -> DeadlineLabel? {
+        if isUpcoming {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            return DeadlineLabel(text: "Starts \(formatter.string(from: startDate))", color: .purple)
+        }
+        
+        guard let deadline = targetDate else {
+            if isCompleted {
+                return DeadlineLabel(text: "Completed", color: .green)
+            }
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            return DeadlineLabel(text: "Started \(formatter.string(from: startDate))", color: Color.secondary)
+        }
+        
+        let today = GoalEntry.startOfCivilDay(for: now)
+        let dueDay = GoalEntry.startOfCivilDay(for: deadline)
+        let daysUntilDue = Calendar.current.dateComponents([.day], from: today, to: dueDay).day ?? 0
+        
+        if isCompleted {
+            guard let completedAt else {
+                return DeadlineLabel(text: "Completed", color: .green)
+            }
+            let completedDay = GoalEntry.startOfCivilDay(for: completedAt)
+            let daysLate = Calendar.current.dateComponents([.day], from: dueDay, to: completedDay).day ?? 0
+            if daysLate <= 0 {
+                return DeadlineLabel(text: "Completed on time", color: .green)
+            }
+            let lateText = daysLate == 1
+                ? "Completed 1 day late"
+                : "Completed \(daysLate) days late"
+            return DeadlineLabel(text: lateText, color: .orange)
+        }
+        
+        if daysUntilDue < 0 {
+            let overdue = -daysUntilDue
+            let text = overdue == 1
+                ? "Overdue by 1 day"
+                : "Overdue by \(overdue) days"
+            return DeadlineLabel(text: text, color: .red)
+        }
+        if daysUntilDue == 0 {
+            return DeadlineLabel(text: "Due today", color: .orange)
+        }
+        if daysUntilDue == 1 {
+            return DeadlineLabel(text: "Due tomorrow", color: .orange)
+        }
+        if daysUntilDue <= 7 {
+            return DeadlineLabel(text: "Due in \(daysUntilDue) days", color: .orange)
+        }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return DeadlineLabel(text: "Due \(formatter.string(from: deadline))", color: .secondary)
+    }
+    
     // MARK: - Date Range
     
     /// Inclusive range for counting daily-task completions.
@@ -515,4 +580,27 @@ struct ProjectProgress {
     func detail(for milestoneId: UUID) -> MilestoneProgress? {
         milestoneDetails.first { $0.milestoneId == milestoneId }
     }
+}
+
+/// Live pulse for a project: streak, recent days, and one encouraging line.
+struct ProjectMomentum: Equatable {
+    enum DayKind: Equatable {
+        case none
+        case skipped
+        case missed
+        case partial
+        case done
+    }
+    
+    struct DayMark: Equatable, Identifiable {
+        let date: Date
+        let kind: DayKind
+        var id: Date { date }
+    }
+    
+    let streak: Int
+    let daysSinceStart: Int
+    let linkedTaskCount: Int
+    let recentDays: [DayMark]
+    let encouragement: String
 }

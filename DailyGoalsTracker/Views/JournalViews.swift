@@ -165,8 +165,9 @@ struct JournalWindowView: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 36, height: 36)
                     .background(Circle().fill(Color.primary.opacity(0.05)))
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             
@@ -185,8 +186,9 @@ struct JournalWindowView: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 36, height: 36)
                     .background(Circle().fill(Color.primary.opacity(0.05)))
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
         }

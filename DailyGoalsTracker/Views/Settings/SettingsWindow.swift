@@ -4,11 +4,14 @@ import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
     case general = "General"
-    case goals = "Goals"
+    case goals = "Tasks"
+    case projects = "Projects"
     case schedule = "Schedule"
     case modes = "Day Modes"
     case prayer = "Prayer"
     case appTime = "App Time"
+    case reports = "Reports"
+    case suggestAI = "Suggest AI"
     
     var id: String { rawValue }
     
@@ -16,10 +19,13 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .general: return "gearshape"
         case .goals: return "checklist"
+        case .projects: return "flag.fill"
         case .schedule: return "calendar.badge.clock"
         case .modes: return "circle.grid.2x2.fill"
         case .prayer: return "moon.stars.fill"
         case .appTime: return "clock.fill"
+        case .reports: return "text.page"
+        case .suggestAI: return "sparkles"
         }
     }
 }
@@ -30,6 +36,8 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
 final class SettingsRouter {
     var selectedPane: SettingsPane = .general
     var goalIdToEdit: UUID?
+    var reportIdToOpen: String?
+    var projectIdToOpen: UUID?
     
     func editGoal(_ goalId: UUID) {
         selectedPane = .goals
@@ -39,13 +47,35 @@ final class SettingsRouter {
     func clearGoalEdit() {
         goalIdToEdit = nil
     }
+    
+    func showReport(_ id: String) {
+        selectedPane = .reports
+        reportIdToOpen = id
+    }
+    
+    func clearReportOpen() {
+        reportIdToOpen = nil
+    }
+    
+    func showProjects() {
+        selectedPane = .projects
+        projectIdToOpen = nil
+    }
+    
+    func showProject(_ id: UUID) {
+        selectedPane = .projects
+        projectIdToOpen = id
+    }
+    
+    func clearProjectOpen() {
+        projectIdToOpen = nil
+    }
 }
 
 // MARK: - Settings Window View
 
 struct SettingsWindowView: View {
     @Environment(SettingsRouter.self) private var settingsRouter
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     
     private static let windowSize = CGSize(width: 780, height: 540)
     private static let sidebarWidth: CGFloat = 200
@@ -53,14 +83,20 @@ struct SettingsWindowView: View {
     var body: some View {
         @Bindable var router = settingsRouter
         
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        HStack(spacing: 0) {
             List(selection: $router.selectedPane) {
                 Section {
                     settingsLink(.general)
                 }
                 
+                Section("Apple Intelligence") {
+                    settingsLink(.suggestAI)
+                    settingsLink(.reports)
+                }
+                
                 Section("Tracking") {
                     settingsLink(.goals)
+                    settingsLink(.projects)
                     settingsLink(.schedule)
                     settingsLink(.modes)
                 }
@@ -71,32 +107,22 @@ struct SettingsWindowView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(
-                min: Self.sidebarWidth,
-                ideal: Self.sidebarWidth,
-                max: 240
-            )
-        } detail: {
+            .frame(width: Self.sidebarWidth)
+            
             detailPane(for: router.selectedPane)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationSplitViewStyle(.balanced)
         .frame(
             minWidth: Self.windowSize.width,
             idealWidth: Self.windowSize.width,
             minHeight: Self.windowSize.height,
             idealHeight: Self.windowSize.height
         )
-        .onAppear {
-            columnVisibility = .all
-        }
     }
     
     private func settingsLink(_ pane: SettingsPane) -> some View {
-        NavigationLink(value: pane) {
-            Label(pane.rawValue, systemImage: pane.icon)
-        }
-        .tag(pane)
+        Label(pane.rawValue, systemImage: pane.icon)
+            .tag(pane)
     }
     
     @ViewBuilder
@@ -106,6 +132,8 @@ struct SettingsWindowView: View {
             GeneralSettingsPane()
         case .goals:
             GoalsSettingsPane()
+        case .projects:
+            ProjectsSettingsPane()
         case .schedule:
             ScheduleSettingsPane()
         case .modes:
@@ -114,6 +142,10 @@ struct SettingsWindowView: View {
             PrayerSettingsPane()
         case .appTime:
             AppTimeSettingsPane()
+        case .reports:
+            ReportsSettingsPane()
+        case .suggestAI:
+            SuggestAISettingsPane()
         }
     }
 }

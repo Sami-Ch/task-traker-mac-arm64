@@ -54,17 +54,17 @@ struct ScheduleSettingsPane: View {
             
             Section("Weekly Template") {
                 if dataStore.goals.isEmpty {
-                    Text("Add goals in the Goals settings first to configure the weekly template.")
+                    Text("Add tasks in the Tasks settings first to configure the weekly template.")
                         .foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Toggle days to include or skip each goal. Past frozen days stay unchanged.")
+                        Text("Toggle days to include or skip each task. Past frozen days stay unchanged.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
                         // Header row
                         HStack(spacing: 0) {
-                            Text("Goal")
+                            Text("Task")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.tertiary)
                                 .frame(maxWidth: .infinity, alignment: .leading)

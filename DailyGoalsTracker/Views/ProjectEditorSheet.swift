@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Editor sheet for creating/editing a project
+/// Grouped form for creating or editing a project’s name, dates, icon, and color.
 struct ProjectEditorSheet: View {
     @Environment(DataStore.self) private var dataStore
     @Environment(\.dismiss) private var dismiss
@@ -26,208 +26,136 @@ struct ProjectEditorSheet: View {
         "dollarsign.circle.fill", "chart.line.uptrend.xyaxis", "trophy.fill", "medal.fill"
     ]
     
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
-            header
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                
+                Spacer()
+                
+                Text(isEditing ? "Edit Project" : "New Project")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Button("Save") { saveProject() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSave)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
             
             Divider()
             
-            ScrollView {
-                VStack(spacing: 20) {
-                    basicInfoSection
-                    datesSection
-                    Text("Link daily tasks and set targets on each milestone after saving.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    appearanceSection
+            Form {
+                Section {
+                    TextField("Name", text: $title)
+                    TextField("Description", text: $description, axis: .vertical)
+                        .lineLimit(2...4)
                 }
-                .padding(16)
+                
+                Section("Timeline") {
+                    DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
+                    Toggle("Target Date", isOn: $hasDeadline)
+                    if hasDeadline {
+                        DatePicker(
+                            "Deadline",
+                            selection: $targetDate,
+                            in: startDate...,
+                            displayedComponents: .date
+                        )
+                    }
+                    if GoalEntry.startOfCivilDay(for: startDate) > GoalEntry.startOfCivilDay(for: Date()) {
+                        Text("This project stays under Upcoming until the start date.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                Section("Appearance") {
+                    colorPicker
+                    iconPicker
+                    previewRow
+                }
+                
+                Section {
+                    Text("Link daily tasks and set targets on each milestone after saving.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .formStyle(.grouped)
         }
+        .frame(width: 480, height: 560)
         .onAppear(perform: loadProject)
     }
     
-    // MARK: - Header
-    
-    private var header: some View {
+    private var colorPicker: some View {
         HStack {
-            Button("Cancel") { dismiss() }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-            
+            Text("Color")
             Spacer()
-            
-            Text(isEditing ? "Edit Project" : "New Project")
-                .font(.system(size: 14, weight: .semibold))
-            
-            Spacer()
-            
-            Button("Save") { saveProject() }
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
-                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-    
-    // MARK: - Basic Info Section
-    
-    private var basicInfoSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Project Name")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                
-                TextField("e.g., Learn Spanish", text: $title)
-                    .textFieldStyle(.roundedBorder)
-            }
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Description (optional)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                
-                TextField("What's this project about?", text: $description, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(2...4)
-            }
-        }
-    }
-    
-    // MARK: - Dates Section
-    
-    private var datesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Timeline")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Start Date")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                    DatePicker("", selection: $startDate, displayedComponents: .date)
-                        .labelsHidden()
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Target Date", isOn: $hasDeadline)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                    
-                    if hasDeadline {
-                        DatePicker("", selection: $targetDate, in: startDate..., displayedComponents: .date)
-                            .labelsHidden()
-                    }
-                }
-            }
-            
-            if GoalEntry.startOfCivilDay(for: startDate) > GoalEntry.startOfCivilDay(for: Date()) {
-                Text("This project will appear under Upcoming until the start date.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.purple)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.primary.opacity(0.03))
-        )
-    }
-    
-    // MARK: - Appearance Section
-    
-    private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Color")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                
-                HStack(spacing: 8) {
-                    ForEach(ProjectColorName.allCases) { color in
-                        Button {
-                            selectedColor = color.rawValue
-                        } label: {
-                            Circle()
-                                .fill(color.color)
-                                .frame(width: 24, height: 24)
-                                .overlay {
-                                    if selectedColor == color.rawValue {
-                                        Circle()
-                                            .strokeBorder(.white, lineWidth: 2)
-                                            .padding(2)
-                                        Circle()
-                                            .strokeBorder(color.color, lineWidth: 2)
-                                    }
-                                }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Icon")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
-                    ForEach(iconOptions, id: \.self) { icon in
-                        Button { selectedIcon = icon } label: {
-                            let tint = ProjectColorName(rawValue: selectedColor)?.color ?? .blue
-                            Image(systemName: icon)
-                                .font(.system(size: 16))
-                                .frame(width: 36, height: 36)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(selectedIcon == icon ? tint.opacity(0.25) : Color.gray.opacity(0.08))
-                                )
-                                .foregroundStyle(selectedIcon == icon ? tint : .secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Preview")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                
-                HStack(spacing: 10) {
-                    let color = ProjectColorName(rawValue: selectedColor)?.color ?? .blue
-                    ZStack {
+            HStack(spacing: 8) {
+                ForEach(ProjectColorName.allCases) { color in
+                    Button {
+                        selectedColor = color.rawValue
+                    } label: {
                         Circle()
-                            .fill(color.opacity(0.15))
-                            .frame(width: 32, height: 32)
-                        Image(systemName: selectedIcon)
-                            .font(.system(size: 14))
-                            .foregroundStyle(color)
+                            .fill(color.color)
+                            .frame(width: 22, height: 22)
+                            .overlay {
+                                if selectedColor == color.rawValue {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white)
+                                }
+                            }
                     }
-                    
-                    Text(title.isEmpty ? "Project Name" : title)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(title.isEmpty ? .secondary : .primary)
-                    
-                    Spacer()
+                    .buttonStyle(.plain)
+                    .help(color.rawValue.capitalized)
                 }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.primary.opacity(0.03))
-                )
             }
         }
     }
     
-    // MARK: - Actions
+    private var iconPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Icon")
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                ForEach(iconOptions, id: \.self) { icon in
+                    Button { selectedIcon = icon } label: {
+                        Image(systemName: icon)
+                            .font(.body)
+                            .frame(width: 36, height: 36)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(selectedIcon == icon ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.05))
+                            )
+                            .foregroundStyle(selectedIcon == icon ? Color.accentColor : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+    
+    private var previewRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: selectedIcon)
+                .font(.title3)
+                .foregroundStyle(ProjectColorName(rawValue: selectedColor)?.color ?? .accentColor)
+                .frame(width: 28, height: 28)
+            Text(title.isEmpty ? "Project Name" : title)
+                .font(.body)
+                .foregroundStyle(title.isEmpty ? .secondary : .primary)
+            Spacer()
+        }
+    }
     
     private func loadProject() {
         guard let project else { return }
@@ -272,7 +200,6 @@ struct ProjectEditorSheet: View {
 #Preview("New Project") {
     ProjectEditorSheet(project: nil)
         .environment(DataStore())
-        .frame(width: 480, height: 560)
 }
 
 #Preview("Edit Project") {
@@ -289,5 +216,4 @@ struct ProjectEditorSheet: View {
     
     return ProjectEditorSheet(project: project)
         .environment(store)
-        .frame(width: 480, height: 560)
 }
