@@ -27,10 +27,12 @@ struct TrackerSettings: Codable, Equatable {
     var dayEndMinutes: Int
     /// When true, Maghrib (from prayer times) is the day start; falls back to `dayStartMinutes`.
     var dayStartsAtMaghrib: Bool
-    /// Weekly and monthly progress reports (notification + optional Apple Intelligence summary).
+    /// Weekly and monthly progress reports.
     var periodReportsEnabled: Bool
-    /// How the person works, used when reports suggest easier tasks.
-    var workingStyleNotes: String
+    /// Minutes of no typing or clicking before an unlocked journal locks again. 0 means only when the window closes.
+    var journalAutoLockMinutes: Int
+    
+    static let journalAutoLockChoices = [5, 15, 30, 60, 120, 240]
     
     static let `default` = TrackerSettings(
         calendarDisplay: .gregorian,
@@ -38,7 +40,7 @@ struct TrackerSettings: Codable, Equatable {
         dayEndMinutes: 23 * 60 + 59,
         dayStartsAtMaghrib: false,
         periodReportsEnabled: true,
-        workingStyleNotes: ""
+        journalAutoLockMinutes: 60
     )
     
     init(
@@ -47,14 +49,14 @@ struct TrackerSettings: Codable, Equatable {
         dayEndMinutes: Int = 23 * 60 + 59,
         dayStartsAtMaghrib: Bool = false,
         periodReportsEnabled: Bool = true,
-        workingStyleNotes: String = ""
+        journalAutoLockMinutes: Int = 60
     ) {
         self.calendarDisplay = calendarDisplay
         self.dayStartMinutes = Self.clampedMinutes(dayStartMinutes)
         self.dayEndMinutes = Self.clampedMinutes(dayEndMinutes)
         self.dayStartsAtMaghrib = dayStartsAtMaghrib
         self.periodReportsEnabled = periodReportsEnabled
-        self.workingStyleNotes = workingStyleNotes
+        self.journalAutoLockMinutes = Self.clampedAutoLock(journalAutoLockMinutes)
     }
     
     init(from decoder: Decoder) throws {
@@ -64,10 +66,14 @@ struct TrackerSettings: Codable, Equatable {
         dayEndMinutes = Self.clampedMinutes(try c.decodeIfPresent(Int.self, forKey: .dayEndMinutes) ?? (23 * 60 + 59))
         dayStartsAtMaghrib = try c.decodeIfPresent(Bool.self, forKey: .dayStartsAtMaghrib) ?? false
         periodReportsEnabled = try c.decodeIfPresent(Bool.self, forKey: .periodReportsEnabled) ?? true
-        workingStyleNotes = try c.decodeIfPresent(String.self, forKey: .workingStyleNotes) ?? ""
+        journalAutoLockMinutes = Self.clampedAutoLock(try c.decodeIfPresent(Int.self, forKey: .journalAutoLockMinutes) ?? 60)
     }
     
     static func clampedMinutes(_ value: Int) -> Int {
         min(max(value, 0), 23 * 60 + 59)
+    }
+    
+    static func clampedAutoLock(_ value: Int) -> Int {
+        journalAutoLockChoices.contains(value) ? value : 60
     }
 }

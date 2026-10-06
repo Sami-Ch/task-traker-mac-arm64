@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsWindow: NSWindow?
     
     private var freezeTimer: Timer?
+    /// The click that opens the panel is also seen by the outside-click monitor.
+    private var ignoreOutsideClicksUntil = Date.distantPast
     
     let dataStore = DataStore()
     let prayerService = PrayerService()
@@ -69,9 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.image?.size = NSSize(width: 18, height: 18)
             button.action = #selector(togglePopover)
             button.target = self
-            
-            // Right-click for quick menu
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            // Mouse-up never arrives on the status item, so the click did nothing.
+            button.sendAction(on: [.leftMouseDown, .rightMouseDown])
         }
     }
     
@@ -107,8 +108,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.level = .popUpMenu
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = false
         panel.hidesOnDeactivate = false
         panel.appearance = NSAppearance(named: .darkAqua)
@@ -129,6 +131,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     
     private func closePanelIfClickOutside(_ event: NSEvent) {
         guard isPanelVisible, let panel else { return }
+        if Date() < ignoreOutsideClicksUntil { return }
+        if event.window === statusItem.button?.window { return }
         let location = NSEvent.mouseLocation
         if panel.frame.contains(location) { return }
         if let button = statusItem.button, let buttonWindow = button.window {
@@ -172,8 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         
         let event = NSApp.currentEvent
         
-        // Right-click shows context menu
-        if event?.type == .rightMouseUp {
+        if event?.type == .rightMouseDown || event?.type == .rightMouseUp {
             showContextMenu()
             return
         }
@@ -207,8 +210,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             y = min(max(visible.minY + 8, y), visible.maxY - size.height - 8)
         }
         panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // A menu-bar app is not active, so makeKeyAndOrderFront leaves the panel hidden.
+        ignoreOutsideClicksUntil = Date().addingTimeInterval(0.25)
+        panel.orderFrontRegardless()
     }
     
     private func hidePanel() {
@@ -347,7 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     
     // MARK: - Cleanup
     func applicationWillTerminate(_ notification: Notification) {
-        dataStore.setJournal(journalState.draftText, for: journalState.selectedDate)
+        dataStore.setJournal(journalState.attributedText, for: journalState.selectedDate)
         appUsageService.persist()
         freezeTimer?.invalidate()
         if let eventMonitor = eventMonitor {
@@ -369,7 +373,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let closing = notification.object as? NSWindow
         
         if closing === journalWindow {
-            dataStore.setJournal(journalState.draftText, for: journalState.selectedDate)
+            dataStore.setJournal(journalState.attributedText, for: journalState.selectedDate)
+            dataStore.lockJournal()
         }
         
         // Stay regular while another managed window is still open

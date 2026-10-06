@@ -11,7 +11,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
     case prayer = "Prayer"
     case appTime = "App Time"
     case reports = "Reports"
-    case suggestAI = "Suggest AI"
+    case journal = "Journal"
     
     var id: String { rawValue }
     
@@ -25,7 +25,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
         case .prayer: return "moon.stars.fill"
         case .appTime: return "clock.fill"
         case .reports: return "text.page"
-        case .suggestAI: return "sparkles"
+        case .journal: return "lock.fill"
         }
     }
 }
@@ -89,16 +89,13 @@ struct SettingsWindowView: View {
                     settingsLink(.general)
                 }
                 
-                Section("Apple Intelligence") {
-                    settingsLink(.suggestAI)
-                    settingsLink(.reports)
-                }
-                
                 Section("Tracking") {
                     settingsLink(.goals)
                     settingsLink(.projects)
                     settingsLink(.schedule)
                     settingsLink(.modes)
+                    settingsLink(.reports)
+                    settingsLink(.journal)
                 }
                 
                 Section("Integrations") {
@@ -144,8 +141,8 @@ struct SettingsWindowView: View {
             AppTimeSettingsPane()
         case .reports:
             ReportsSettingsPane()
-        case .suggestAI:
-            SuggestAISettingsPane()
+        case .journal:
+            JournalSettingsPane()
         }
     }
 }

@@ -163,6 +163,7 @@ struct DayView: View {
                 SkippedGoalsSection(goals: dayGoals.skipped)
             }
             .padding(.top, 4)
+            .padding(.bottom, 6)
         }
         .scrollBounceBehavior(.basedOnSize)
         .defaultScrollAnchor(.top)

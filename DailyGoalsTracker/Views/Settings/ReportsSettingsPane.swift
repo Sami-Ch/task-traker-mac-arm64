@@ -29,15 +29,7 @@ struct ReportsSettingsPane: View {
             Section {
                 Toggle("Weekly and monthly reports", isOn: periodReportsBinding)
             } footer: {
-                Text("A notification arrives when a week or month ends. It uses the word task, and Apple Intelligence names the report.")
-            }
-            
-            Section {
-                LabeledContent("Apple Intelligence") {
-                    Text(PeriodReportService.appleIntelligenceStatusText)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                }
+                Text("A notification arrives when a week or month ends.")
             }
             
             Section("Library") {
@@ -154,17 +146,8 @@ struct PeriodReportReader: View {
                         tint: .blue,
                         lines: report.suggestions
                     )
-                } else {
-                    Text("Suggestions appear here after Apple Intelligence reads this period. Add how you work under Suggest AI so they fit you.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
                 }
                 notesSection
-                if report.usedAppleIntelligence {
-                    Label("Written with Apple Intelligence", systemImage: "sparkles")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
             }
             .padding(24)
             .frame(maxWidth: 680, alignment: .leading)
@@ -174,44 +157,10 @@ struct PeriodReportReader: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
     
-    private var isRewritingNotes: Bool {
-        dataStore.periodReportService?.rewritingReportId == report.id
-    }
-    
-    private var notesError: String? {
-        guard dataStore.periodReportService?.notesRewriteErrorReportId == report.id else { return nil }
-        return dataStore.periodReportService?.notesRewriteError
-    }
-    
     private var notesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Notes")
-                    .font(.headline)
-                Spacer(minLength: 12)
-                Button {
-                    Task { await dataStore.periodReportService?.rewriteNotes(for: report.id) }
-                } label: {
-                    if isRewritingNotes {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label("Redo", systemImage: "arrow.clockwise")
-                            .font(.subheadline.weight(.medium))
-                    }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-                .disabled(isRewritingNotes || !PeriodReportService.isAppleIntelligenceAvailable)
-                .help("Rewrite the notes from the latest suggestions")
-            }
-            
-            if let notesError {
-                Text(notesError)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("Notes")
+                .font(.headline)
             
             if report.paragraphs.isEmpty {
                 Text("Notes say what this pattern leads to, what to add, and how to keep the tasks that already work.")

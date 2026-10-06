@@ -40,12 +40,12 @@ enum PeriodReportKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// One stored weekly or monthly report (facts + summary, optionally AI-written).
+/// One stored weekly or monthly report.
 struct PeriodReport: Identifiable, Equatable, Hashable {
     /// Stable key, e.g. `week:2026-09-22` or `month:2026-09`.
     let id: String
     var kind: PeriodReportKind
-    /// Short name. Apple Intelligence writes this when available.
+    /// Short name, usually the week or month label.
     var title: String
     var periodStart: Date
     var periodEnd: Date
@@ -54,7 +54,7 @@ struct PeriodReport: Identifiable, Equatable, Hashable {
     /// Narrative shown in the reader.
     var fullText: String
     var usedAppleIntelligence: Bool
-    /// True once Apple Intelligence has named this report.
+    /// Kept so older report files still decode.
     var titleIsGenerated: Bool
     var shortcomings: [String]
     var suggestions: [String]

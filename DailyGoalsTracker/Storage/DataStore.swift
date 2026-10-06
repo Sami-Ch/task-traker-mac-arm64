@@ -1,3 +1,5 @@
+import AppKit
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -15,12 +17,13 @@ final class DataStore {
     var settings: TrackerSettings = .default
     var projects: [Project] = []  // Long-running projects with linked goals
     var periodReports: [PeriodReport] = []
+    let journalLock = JournalLock()
     
     /// Used for Maghrib-based day start. Set from AppDelegate.
     weak var prayerService: PrayerService?
     /// Schedules project/milestone local notifications. Set from AppDelegate.
     weak var projectAlertService: ProjectAlertService?
-    /// Weekly / monthly Apple Intelligence reports. Set from AppDelegate.
+    /// Weekly / monthly reports. Set from AppDelegate.
     weak var periodReportService: PeriodReportService?
     
     var calendarPresentation: CalendarPresentation {
@@ -96,6 +99,43 @@ final class DataStore {
         
         ensureDayModes()
         ensureDaySnapshotsCurrent()
+        watchJournalActivity()
+    }
+    
+    private var journalInactivityTimer: Timer?
+    private var journalActivityMonitor: Any?
+    
+    private func watchJournalActivity() {
+        let mask: NSEvent.EventTypeMask = [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel, .mouseMoved]
+        journalActivityMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.noteJournalActivity()
+            return event
+        }
+    }
+    
+    func noteJournalActivity() {
+        guard journalLock.isUnlocked else { return }
+        scheduleJournalAutoLock()
+    }
+    
+    func scheduleJournalAutoLock() {
+        journalInactivityTimer?.invalidate()
+        let minutes = settings.journalAutoLockMinutes
+        guard journalLock.isUnlocked, minutes > 0 else { return }
+        journalInactivityTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(minutes) * 60, repeats: false) { [weak self] _ in
+            self?.lockJournal()
+        }
+    }
+    
+    /// Write sealed days back to memory and drop the key.
+    func lockJournal() {
+        guard journalLock.hasPassword, journalLock.isUnlocked else { return }
+        journalInactivityTimer?.invalidate()
+        saveJournals()
+        for (key, entry) in journals where journalLock.dayShouldSeal(entry) {
+            journals[key] = journalLock.prepareForDisk(entry)
+        }
+        journalLock.endSession()
     }
     
     // MARK: - Data Loading
@@ -172,10 +212,13 @@ final class DataStore {
     }
     
     private func loadJournals() {
-        guard let data = try? Data(contentsOf: journalsFileURL),
-              let decoded = try? JSONDecoder().decode([JournalEntry].self, from: data) else {
+        guard let data = try? Data(contentsOf: journalsFileURL) else { return }
+        if let document = try? JSONDecoder().decode(JournalDocument.self, from: data) {
+            journalLock.adopt(record: document.vault, scope: document.scope)
+            journals = Dictionary(uniqueKeysWithValues: document.entries.map { ($0.dateString, $0) })
             return
         }
+        guard let decoded = try? JSONDecoder().decode([JournalEntry].self, from: data) else { return }
         journals = Dictionary(uniqueKeysWithValues: decoded.map { ($0.dateString, $0) })
     }
     
@@ -246,8 +289,9 @@ final class DataStore {
     }
     
     private func saveJournals() {
-        let entries = Array(journals.values)
-        guard let data = try? JSONEncoder().encode(entries) else { return }
+        let entries = journals.values.map { journalLock.prepareForDisk($0) }
+        let document = JournalDocument(vault: journalLock.record, scope: journalLock.scope, entries: entries)
+        guard let data = try? JSONEncoder().encode(document) else { return }
         try? data.write(to: journalsFileURL)
     }
     
@@ -260,11 +304,6 @@ final class DataStore {
     func saveSettings() {
         guard let data = try? JSONEncoder().encode(settings) else { return }
         try? data.write(to: settingsFileURL)
-    }
-    
-    func setWorkingStyleNotes(_ text: String) {
-        settings.workingStyleNotes = text
-        saveSettings()
     }
     
     private func savePeriodReports() {
@@ -760,8 +799,122 @@ final class DataStore {
         return !entry.isEmpty
     }
     
+    /// Get the attributed string for a journal entry.
+    /// If the entry has RTF data, returns that. Otherwise converts legacy markdown to attributed string.
+    func journalAttributedString(for date: Date) -> NSAttributedString {
+        guard let entry = journal(for: date), !entry.isSealed else {
+            return JournalRichText.defaultAttributedString()
+        }
+        // If we have RTF data, use it
+        if let attrString = entry.attributedString() {
+            return attrString
+        }
+        // Legacy markdown entry - convert to rich text
+        if !entry.text.isEmpty {
+            return JournalRichText.fromMarkdown(entry.text)
+        }
+        return JournalRichText.defaultAttributedString()
+    }
+    
+    /// Save journal with both plain text and RTF data.
+    func setJournal(_ attributedString: NSAttributedString, for date: Date) {
+        let key = GoalEntry.dateString(from: date)
+        let plainText = attributedString.string
+        let trimmed = plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if journals[key]?.isSealed == true && !journalLock.isUnlocked {
+            return
+        }
+        if trimmed.isEmpty {
+            if journals.removeValue(forKey: key) != nil {
+                saveJournals()
+            }
+        } else {
+            var entry = JournalEntry.from(attributedString: attributedString, date: date)
+            entry.markedSecure = journals[key]?.markedSecure ?? false
+            if journals[key]?.text != plainText || journals[key]?.rtfData != entry.rtfData || journals[key]?.markedSecure != entry.markedSecure {
+                journals[key] = entry
+                saveJournals()
+            }
+        }
+    }
+    
+    func setJournalPassword(_ password: String, confirmation: String) throws {
+        try journalLock.setPassword(password, confirmation: confirmation)
+        saveJournals()
+    }
+    
+    func changeJournalPassword(from old: String, to new: String, confirmation: String) throws {
+        try journalLock.changePassword(from: old, to: new, confirmation: confirmation)
+        saveJournals()
+    }
+    
+    func removeJournalPassword(_ password: String) throws {
+        try journalLock.unlock(password: password)
+        revealSealedJournals()
+        try journalLock.removePassword(password)
+        for key in journals.keys {
+            journals[key]?.markedSecure = false
+            journals[key]?.sealedPayload = nil
+        }
+        saveJournals()
+    }
+    
+    func unlockJournal(password: String) throws {
+        try journalLock.unlock(password: password)
+        revealSealedJournals()
+        scheduleJournalAutoLock()
+    }
+    
+    func unlockJournalWithTouchID(fresh: Bool = false) async throws {
+        try await journalLock.unlockWithTouchID(fresh: fresh)
+        revealSealedJournals()
+        if journals.values.contains(where: \.isSealed) {
+            journalLock.endSession()
+            throw JournalLockError.needsJournalPassword
+        }
+        scheduleJournalAutoLock()
+    }
+    
+    func setJournalTouchID(_ enabled: Bool) async throws {
+        try await journalLock.setTouchIDEnabled(enabled)
+        saveJournals()
+    }
+    
+    func setJournalScope(_ scope: JournalLockScope) throws {
+        if journalLock.hasPassword && !journalLock.isUnlocked {
+            throw JournalLockError.locked
+        }
+        journalLock.scope = scope
+        saveJournals()
+    }
+    
+    func setDaySecure(_ date: Date, secure: Bool) throws {
+        if journalLock.scope == .all { return }
+        guard journalLock.hasPassword else { throw JournalLockError.passwordRequired }
+        guard journalLock.isUnlocked else { throw JournalLockError.locked }
+        let key = GoalEntry.dateString(from: date)
+        guard var entry = journals[key] else { return }
+        entry.markedSecure = secure
+        entry.sealedPayload = nil
+        journals[key] = entry
+        saveJournals()
+    }
+    
+    private func revealSealedJournals() {
+        for (key, entry) in journals where entry.isSealed {
+            if let opened = journalLock.reveal(entry) {
+                journals[key] = opened
+            }
+        }
+    }
+    
+    /// Legacy setter for plain text only (used by old code paths).
     func setJournal(_ text: String, for date: Date) {
         let key = GoalEntry.dateString(from: date)
+        if journals[key]?.isSealed == true && !journalLock.isUnlocked {
+            return
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             if journals.removeValue(forKey: key) != nil {
