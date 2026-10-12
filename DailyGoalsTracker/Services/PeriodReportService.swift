@@ -153,6 +153,7 @@ final class PeriodReportService {
         var totalPartial = 0
         var totalNotDone = 0
         var perfectDays = 0
+        var score = 0.0
         var dayLines: [String] = []
         var goalDone: [UUID: (title: String, done: Int, tracked: Int)] = [:]
         
@@ -162,6 +163,7 @@ final class PeriodReportService {
             totalDone += summary.doneCount
             totalPartial += summary.partialCount
             totalNotDone += summary.notDoneCount
+            score += summary.progressValues.reduce(0, +)
             if summary.totalGoals > 0 && summary.completionPercentage >= 1.0 {
                 perfectDays += 1
             }
@@ -172,15 +174,13 @@ final class PeriodReportService {
                 "\(dayLabel): \(summary.doneCount)/\(summary.totalGoals) done (\(pct)%), mode \(summary.dayMode.title)"
             )
             
-            for entry in summary.entries {
+            for (entry, value) in zip(summary.entries, summary.progressValues) {
                 let goalTitle = dataStore.goals.first(where: { $0.id == entry.goalId })?.title
                     ?? "Task"
                 var bucket = goalDone[entry.goalId] ?? (goalTitle, 0, 0)
                 bucket.tracked += 1
-                if entry.status == .done {
+                if value >= 1 {
                     bucket.done += 1
-                } else if entry.status == .partial {
-                    // Count partial as half in narrative only via rates; still track as attempted
                 }
                 goalDone[entry.goalId] = bucket
             }
@@ -188,8 +188,7 @@ final class PeriodReportService {
         
         let avgPct: Int
         if totalTracked > 0 {
-            let weighted = Double(totalDone) + Double(totalPartial) * 0.5
-            avgPct = Int((weighted / Double(totalTracked)) * 100)
+            avgPct = Int((score / Double(totalTracked) * 100).rounded())
         } else {
             avgPct = 0
         }

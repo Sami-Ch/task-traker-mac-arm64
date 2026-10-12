@@ -1,5 +1,4 @@
 import AppKit
-import AppKit
 import Foundation
 import SwiftUI
 
@@ -12,12 +11,16 @@ final class DataStore {
     var planningGoals: [PlanningGoal] = []  // Big picture goals
     var dayRecords: [String: DayRecord] = [:]  // Key: date string
     var dayModes: [DayMode] = []
-    var journals: [String: JournalEntry] = [:]  // Key: date string
     var snapshots: [String: DaySnapshot] = [:]  // Key: date string
     var settings: TrackerSettings = .default
     var projects: [Project] = []  // Long-running projects with linked goals
     var periodReports: [PeriodReport] = []
-    let journalLock = JournalLock()
+    let journalLock: JournalLock
+    /// Catalog only. Page bodies stay in per-day files.
+    private(set) var journalCatalog: [String: JournalCatalogEntry] = [:]
+    private let journalPages: JournalStore
+    /// Bumped when lock state changes so previews refresh without rewriting the catalog.
+    private var journalEpoch = 0
     
     /// Used for Maghrib-based day start. Set from AppDelegate.
     weak var prayerService: PrayerService?
@@ -32,14 +35,17 @@ final class DataStore {
     
     // MARK: - File Paths
     private let fileManager = FileManager.default
-    private var appSupportURL: URL {
-        let urls = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+    private static func applicationSupportDirectory() -> URL {
+        let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         let appURL = urls[0].appendingPathComponent("DailyGoalsTracker", isDirectory: true)
-        
-        if !fileManager.fileExists(atPath: appURL.path) {
-            try? fileManager.createDirectory(at: appURL, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: appURL.path) {
+            try? FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
         }
         return appURL
+    }
+    
+    private var appSupportURL: URL {
+        Self.applicationSupportDirectory()
     }
     
     private var goalsFileURL: URL {
@@ -60,10 +66,6 @@ final class DataStore {
     
     private var dayModesFileURL: URL {
         appSupportURL.appendingPathComponent("day_modes.json")
-    }
-    
-    private var journalsFileURL: URL {
-        appSupportURL.appendingPathComponent("journals.json")
     }
     
     private var snapshotsFileURL: URL {
@@ -90,6 +92,9 @@ final class DataStore {
     
     // MARK: - Initialization
     init() {
+        let lock = JournalLock()
+        journalLock = lock
+        journalPages = JournalStore(appSupportURL: Self.applicationSupportDirectory(), journalLock: lock)
         loadData()
         
         if goals.isEmpty {
@@ -127,15 +132,13 @@ final class DataStore {
         }
     }
     
-    /// Write sealed days back to memory and drop the key.
+    /// Write sealed days back to disk and drop the key.
     func lockJournal() {
         guard journalLock.hasPassword, journalLock.isUnlocked else { return }
         journalInactivityTimer?.invalidate()
-        saveJournals()
-        for (key, entry) in journals where journalLock.dayShouldSeal(entry) {
-            journals[key] = journalLock.prepareForDisk(entry)
-        }
+        try? journalPages.sealForLock()
         journalLock.endSession()
+        publishJournalCatalog()
     }
     
     // MARK: - Data Loading
@@ -212,14 +215,8 @@ final class DataStore {
     }
     
     private func loadJournals() {
-        guard let data = try? Data(contentsOf: journalsFileURL) else { return }
-        if let document = try? JSONDecoder().decode(JournalDocument.self, from: data) {
-            journalLock.adopt(record: document.vault, scope: document.scope)
-            journals = Dictionary(uniqueKeysWithValues: document.entries.map { ($0.dateString, $0) })
-            return
-        }
-        guard let decoded = try? JSONDecoder().decode([JournalEntry].self, from: data) else { return }
-        journals = Dictionary(uniqueKeysWithValues: decoded.map { ($0.dateString, $0) })
+        journalPages.load()
+        journalCatalog = journalPages.catalog
     }
     
     private func loadSnapshots() {
@@ -288,13 +285,6 @@ final class DataStore {
         try? data.write(to: dayModesFileURL)
     }
     
-    private func saveJournals() {
-        let entries = journals.values.map { journalLock.prepareForDisk($0) }
-        let document = JournalDocument(vault: journalLock.record, scope: journalLock.scope, entries: entries)
-        guard let data = try? JSONEncoder().encode(document) else { return }
-        try? data.write(to: journalsFileURL)
-    }
-    
     private func saveSnapshots() {
         let records = Array(snapshots.values)
         guard let data = try? JSONEncoder().encode(records) else { return }
@@ -312,9 +302,13 @@ final class DataStore {
     }
     
     func updateSettings(_ mutate: (inout TrackerSettings) -> Void) {
+        let previousShortcuts = settings.shortcuts
         mutate(&settings)
         saveSettings()
         ensureDaySnapshotsCurrent()
+        if settings.shortcuts != previousShortcuts {
+            NotificationCenter.default.post(name: .keyboardShortcutsDidChange, object: nil)
+        }
     }
     
     // MARK: - Period Reports
@@ -446,9 +440,7 @@ final class DataStore {
         let tracked = liveGoalsForDay(day).tracked
         snap.items = tracked.enumerated().map { index, goal in
             SnapshotItem(
-                goalId: goal.id,
-                title: goal.title,
-                icon: goal.icon,
+                goal: goal,
                 order: index,
                 isOverride: snap.extraSet.contains(goal.id) || snap.oneOffItems.contains { $0.goalId == goal.id },
                 isOneOff: snap.oneOffItems.contains { $0.goalId == goal.id }
@@ -502,13 +494,7 @@ final class DataStore {
             if snap.frozen {
                 guard !snap.items.contains(where: { $0.goalId == goalId }) else { return }
                 snap.items.append(
-                    SnapshotItem(
-                        goalId: goal.id,
-                        title: goal.title,
-                        icon: goal.icon,
-                        order: snap.items.count,
-                        isOverride: true
-                    )
+                    SnapshotItem(goal: goal, order: snap.items.count, isOverride: true)
                 )
             } else if !snap.extraGoalIds.contains(goalId) {
                 snap.extraGoalIds.append(goalId)
@@ -516,9 +502,22 @@ final class DataStore {
         }
     }
     
-    func addOneOffTask(title: String, icon: String, on date: Date) {
+    func addOneOffTask(
+        title: String,
+        icon: String,
+        kind: GoalKind = .checklist,
+        targetCount: Int = 1,
+        unit: String = "",
+        step: Int = 1,
+        hourBound: HourBound = .atLeast,
+        targetMinutes: Int = 60,
+        floorMinutes: Int = 0,
+        on date: Date
+    ) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let target = Goal.clampedTarget(targetCount)
+        let trimmedUnit = unit.trimmingCharacters(in: .whitespacesAndNewlines)
         mutateSnapshot(for: date) { snap in
             let item = SnapshotItem(
                 goalId: UUID(),
@@ -526,7 +525,14 @@ final class DataStore {
                 icon: icon,
                 order: snap.frozen ? snap.items.count : snap.oneOffItems.count,
                 isOverride: true,
-                isOneOff: true
+                isOneOff: true,
+                kind: kind,
+                targetCount: target,
+                unit: trimmedUnit,
+                step: step,
+                hourBound: hourBound,
+                targetMinutes: targetMinutes,
+                floorMinutes: floorMinutes
             )
             if snap.frozen {
                 snap.items.append(item)
@@ -544,16 +550,44 @@ final class DataStore {
         return snap?.oneOffItems.contains(where: { $0.goalId == goalId }) == true
     }
     
-    func updateOneOffTask(_ goalId: UUID, title: String, icon: String, on date: Date) {
+    func updateOneOffTask(
+        _ goalId: UUID,
+        title: String,
+        icon: String,
+        kind: GoalKind,
+        targetCount: Int,
+        unit: String,
+        step: Int,
+        hourBound: HourBound,
+        targetMinutes: Int,
+        floorMinutes: Int,
+        on date: Date
+    ) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, isOneOff(goalId, on: date) else { return }
+        let target = Goal.clampedTarget(targetCount)
+        let trimmedUnit = unit.trimmingCharacters(in: .whitespacesAndNewlines)
         mutateSnapshot(for: date) { snap in
             if snap.frozen, let index = snap.items.firstIndex(where: { $0.goalId == goalId }) {
                 snap.items[index].title = trimmed
                 snap.items[index].icon = icon
+                snap.items[index].kind = kind
+                snap.items[index].targetCount = target
+                snap.items[index].unit = trimmedUnit
+                snap.items[index].step = step
+                snap.items[index].hourBound = hourBound
+                snap.items[index].targetMinutes = Goal.clampedMinutes(targetMinutes)
+                snap.items[index].floorMinutes = max(0, floorMinutes)
             } else if let index = snap.oneOffItems.firstIndex(where: { $0.goalId == goalId }) {
                 snap.oneOffItems[index].title = trimmed
                 snap.oneOffItems[index].icon = icon
+                snap.oneOffItems[index].kind = kind
+                snap.oneOffItems[index].targetCount = target
+                snap.oneOffItems[index].unit = trimmedUnit
+                snap.oneOffItems[index].step = step
+                snap.oneOffItems[index].hourBound = hourBound
+                snap.oneOffItems[index].targetMinutes = Goal.clampedMinutes(targetMinutes)
+                snap.oneOffItems[index].floorMinutes = max(0, floorMinutes)
             }
         }
     }
@@ -667,6 +701,96 @@ final class DataStore {
     func cycleStatus(for goalId: UUID, on date: Date) {
         let entry = getEntry(for: goalId, on: date)
         setStatus(entry.status.next, for: goalId, on: date)
+    }
+    
+    func setPercent(_ percent: Int, for goalId: UUID, on date: Date) {
+        let clamped = min(100, max(0, percent))
+        mutateEntry(for: goalId, on: date) { entry in
+            entry.percent = clamped
+            entry.status = GoalStatus.from(progress: Double(clamped) / 100)
+        }
+    }
+    
+    func adjustPercent(for goalId: UUID, on date: Date, by delta: Int) {
+        let entry = getEntry(for: goalId, on: date)
+        setPercent(entry.resolvedPercent + delta, for: goalId, on: date)
+    }
+    
+    /// Week grid: add 25, and wrap from 100 back to 0.
+    func bumpPercent(for goalId: UUID, on date: Date) {
+        let current = getEntry(for: goalId, on: date).resolvedPercent
+        if current >= 100 {
+            setPercent(0, for: goalId, on: date)
+        } else {
+            setPercent(min(100, current + 25), for: goalId, on: date)
+        }
+    }
+    
+    func setAmount(_ amount: Int, for goalId: UUID, on date: Date) {
+        let goal = goalDefinition(goalId, on: date) ?? Goal(id: goalId, title: "")
+        var clamped = max(0, amount)
+        if goal.kind == .count {
+            clamped = min(goal.safeTarget, clamped)
+        }
+        let progress = goal.loggedProgress(clamped)
+        mutateEntry(for: goalId, on: date) { entry in
+            entry.amount = clamped
+            entry.status = GoalStatus.from(progress: progress)
+        }
+    }
+    
+    func adjustAmount(for goalId: UUID, on date: Date, by delta: Int) {
+        let entry = getEntry(for: goalId, on: date)
+        let goal = goalDefinition(goalId, on: date) ?? Goal(id: goalId, title: "")
+        let current = entry.resolvedAmount(for: goal)
+        var next = current + delta
+        if goal.kind == .count, delta > 0 {
+            next = min(goal.safeTarget, next)
+        }
+        setAmount(max(0, next), for: goalId, on: date)
+    }
+    
+    /// Week grid: add one count or one time step, then reset after the goal is already met or the limit is broken.
+    func bumpAmount(for goalId: UUID, on date: Date) {
+        let goal = goalDefinition(goalId, on: date) ?? Goal(id: goalId, title: "")
+        let current = getEntry(for: goalId, on: date).resolvedAmount(for: goal)
+        if goal.kind == .hours {
+            let step = goal.safeHourStep
+            switch goal.hourBound {
+            case .atLeast:
+                if current >= goal.safeTargetMinutes {
+                    setAmount(0, for: goalId, on: date)
+                } else {
+                    setAmount(current + step, for: goalId, on: date)
+                }
+            case .atMost, .between:
+                if current > goal.safeTargetMinutes {
+                    setAmount(0, for: goalId, on: date)
+                } else {
+                    setAmount(current + step, for: goalId, on: date)
+                }
+            }
+        } else if current >= goal.safeTarget {
+            setAmount(0, for: goalId, on: date)
+        } else {
+            setAmount(current + 1, for: goalId, on: date)
+        }
+    }
+    
+    /// The task as it applied on that day, including a frozen snapshot or one-off.
+    func goalDefinition(_ goalId: UUID, on date: Date) -> Goal? {
+        if let tracked = goalsForDay(date).tracked.first(where: { $0.id == goalId }) {
+            return tracked
+        }
+        return goals.first { $0.id == goalId }
+    }
+    
+    private func mutateEntry(for goalId: UUID, on date: Date, _ body: (inout GoalEntry) -> Void) {
+        let key = "\(goalId.uuidString)_\(GoalEntry.dateString(from: date))"
+        var entry = entries[key] ?? GoalEntry(goalId: goalId, date: date)
+        body(&entry)
+        entries[key] = entry
+        saveEntries()
     }
     
     func setNote(_ note: String?, for goalId: UUID, on date: Date) {
@@ -787,98 +911,127 @@ final class DataStore {
     // MARK: - Journal
     
     func journal(for date: Date) -> JournalEntry? {
-        journals[GoalEntry.dateString(from: date)]
+        _ = journalEpoch
+        let key = GoalEntry.dateString(from: date)
+        guard let row = journalCatalog[key] else { return nil }
+        if row.sealed && !journalLock.isUnlocked {
+            return sealedStub(row)
+        }
+        if row.sealed {
+            guard let text = journalPages.plainTextForDisplay(on: date) else {
+                return sealedStub(row)
+            }
+            return JournalEntry(date: row.date, text: text, markedSecure: row.markedSecure, updatedAt: row.updatedAt)
+        }
+        return JournalEntry(date: row.date, text: row.preview, markedSecure: row.markedSecure, updatedAt: row.updatedAt)
+    }
+    
+    /// A writing prompt for each task tracked on this day, appended into the journal.
+    func journalTaskTemplate(for date: Date) -> NSAttributedString {
+        let tasks = goalsForDay(date).tracked
+        let result = NSMutableAttributedString()
+        if tasks.isEmpty {
+            result.append(NSAttributedString(
+                string: "No tasks on this day.\n",
+                attributes: JournalParagraphStyle.normal.attributes()
+            ))
+            return result
+        }
+        
+        for task in tasks {
+            let entry = getEntry(for: task.id, on: date)
+            result.append(NSAttributedString(
+                string: task.title + "\n",
+                attributes: JournalParagraphStyle.heading3.attributes()
+            ))
+            var statusAttributes = JournalParagraphStyle.normal.attributes()
+            statusAttributes[.foregroundColor] = NSColor.secondaryLabelColor
+            result.append(NSAttributedString(
+                string: entry.progressDescription(for: task) + "\n",
+                attributes: statusAttributes
+            ))
+            result.append(NSAttributedString(
+                string: "\n\n",
+                attributes: JournalRichText.defaultAttributes()
+            ))
+        }
+        return result
     }
     
     func journalText(for date: Date) -> String {
-        journal(for: date)?.text ?? ""
+        guard let body = journalPages.loadBody(for: date), !body.isSealed else { return "" }
+        return body.text
     }
     
     func hasJournal(on date: Date) -> Bool {
-        guard let entry = journal(for: date) else { return false }
-        return !entry.isEmpty
+        _ = journalEpoch
+        return journalCatalog[GoalEntry.dateString(from: date)] != nil
     }
     
-    /// Get the attributed string for a journal entry.
-    /// If the entry has RTF data, returns that. Otherwise converts legacy markdown to attributed string.
+    /// Loads one day's file. Legacy markdown is converted when that file has no RTF.
     func journalAttributedString(for date: Date) -> NSAttributedString {
-        guard let entry = journal(for: date), !entry.isSealed else {
+        guard let entry = journalPages.loadBody(for: date), !entry.isSealed else {
             return JournalRichText.defaultAttributedString()
         }
-        // If we have RTF data, use it
         if let attrString = entry.attributedString() {
             return attrString
         }
-        // Legacy markdown entry - convert to rich text
         if !entry.text.isEmpty {
             return JournalRichText.fromMarkdown(entry.text)
         }
         return JournalRichText.defaultAttributedString()
     }
     
-    /// Save journal with both plain text and RTF data.
-    func setJournal(_ attributedString: NSAttributedString, for date: Date) {
-        let key = GoalEntry.dateString(from: date)
-        let plainText = attributedString.string
-        let trimmed = plainText.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if journals[key]?.isSealed == true && !journalLock.isUnlocked {
-            return
-        }
-        if trimmed.isEmpty {
-            if journals.removeValue(forKey: key) != nil {
-                saveJournals()
-            }
-        } else {
-            var entry = JournalEntry.from(attributedString: attributedString, date: date)
-            entry.markedSecure = journals[key]?.markedSecure ?? false
-            if journals[key]?.text != plainText || journals[key]?.rtfData != entry.rtfData || journals[key]?.markedSecure != entry.markedSecure {
-                journals[key] = entry
-                saveJournals()
-            }
+    /// Writes only this day. Returns an error message when the file could not be saved.
+    @discardableResult
+    func setJournal(_ attributedString: NSAttributedString, for date: Date) -> String? {
+        do {
+            try journalPages.save(attributedString: attributedString, date: date)
+            publishJournalCatalog()
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
     
     func setJournalPassword(_ password: String, confirmation: String) throws {
         try journalLock.setPassword(password, confirmation: confirmation)
-        saveJournals()
+        try journalPages.saveVault()
     }
     
     func changeJournalPassword(from old: String, to new: String, confirmation: String) throws {
         try journalLock.changePassword(from: old, to: new, confirmation: confirmation)
-        saveJournals()
+        try journalPages.saveVault()
     }
     
     func removeJournalPassword(_ password: String) throws {
         try journalLock.unlock(password: password)
-        revealSealedJournals()
+        try journalPages.removeAllProtection()
         try journalLock.removePassword(password)
-        for key in journals.keys {
-            journals[key]?.markedSecure = false
-            journals[key]?.sealedPayload = nil
-        }
-        saveJournals()
+        try journalPages.saveVault()
+        publishJournalCatalog()
     }
     
     func unlockJournal(password: String) throws {
         try journalLock.unlock(password: password)
-        revealSealedJournals()
+        publishJournalCatalog()
         scheduleJournalAutoLock()
     }
     
     func unlockJournalWithTouchID(fresh: Bool = false) async throws {
         try await journalLock.unlockWithTouchID(fresh: fresh)
-        revealSealedJournals()
-        if journals.values.contains(where: \.isSealed) {
+        if !journalPages.canOpenASealedPage() {
             journalLock.endSession()
+            publishJournalCatalog()
             throw JournalLockError.needsJournalPassword
         }
+        publishJournalCatalog()
         scheduleJournalAutoLock()
     }
     
     func setJournalTouchID(_ enabled: Bool) async throws {
         try await journalLock.setTouchIDEnabled(enabled)
-        saveJournals()
+        try journalPages.saveVault()
     }
     
     func setJournalScope(_ scope: JournalLockScope) throws {
@@ -886,44 +1039,38 @@ final class DataStore {
             throw JournalLockError.locked
         }
         journalLock.scope = scope
-        saveJournals()
+        if journalLock.hasPassword && journalLock.isUnlocked {
+            try journalPages.rewriteForCurrentScope()
+        } else {
+            try journalPages.saveVault()
+        }
+        publishJournalCatalog()
     }
     
     func setDaySecure(_ date: Date, secure: Bool) throws {
-        if journalLock.scope == .all { return }
-        guard journalLock.hasPassword else { throw JournalLockError.passwordRequired }
-        guard journalLock.isUnlocked else { throw JournalLockError.locked }
-        let key = GoalEntry.dateString(from: date)
-        guard var entry = journals[key] else { return }
-        entry.markedSecure = secure
-        entry.sealedPayload = nil
-        journals[key] = entry
-        saveJournals()
+        try journalPages.setMarkedSecure(secure, date: date)
+        publishJournalCatalog()
     }
     
-    private func revealSealedJournals() {
-        for (key, entry) in journals where entry.isSealed {
-            if let opened = journalLock.reveal(entry) {
-                journals[key] = opened
-            }
-        }
-    }
-    
-    /// Legacy setter for plain text only (used by old code paths).
+    /// Legacy setter for plain text only.
     func setJournal(_ text: String, for date: Date) {
-        let key = GoalEntry.dateString(from: date)
-        if journals[key]?.isSealed == true && !journalLock.isUnlocked {
-            return
-        }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            if journals.removeValue(forKey: key) != nil {
-                saveJournals()
-            }
-        } else if journals[key]?.text != text {
-            journals[key] = JournalEntry(date: date, text: text)
-            saveJournals()
-        }
+        let attr = NSAttributedString(string: text, attributes: JournalRichText.defaultAttributes())
+        setJournal(attr, for: date)
+    }
+    
+    private func sealedStub(_ row: JournalCatalogEntry) -> JournalEntry {
+        JournalEntry(
+            date: row.date,
+            text: "",
+            markedSecure: row.markedSecure,
+            sealedPayload: Data(),
+            updatedAt: row.updatedAt
+        )
+    }
+    
+    private func publishJournalCatalog() {
+        journalCatalog = journalPages.catalog
+        journalEpoch &+= 1
     }
     
     /// Goals that apply on a given day (template + mode + overrides, or frozen snapshot).
@@ -976,9 +1123,13 @@ final class DataStore {
         let dayMode = mode(for: date)
         let (tracked, skipped) = goalsForDay(date)
         let dayEntries = tracked.map { getEntry(for: $0.id, on: date) }
+        let progress = zip(tracked, dayEntries).map { goal, entry in
+            entry.progressValue(for: goal)
+        }
         return DailySummary(
             date: date,
             entries: dayEntries,
+            progressValues: progress,
             totalGoals: tracked.count,
             dayMode: dayMode,
             skippedCount: skipped.count
@@ -1001,7 +1152,7 @@ final class DataStore {
         let labelFormatter = DateFormatter()
         labelFormatter.dateFormat = useWeekday ? "EEE" : "d"
         
-        var buckets: [UUID: (title: String, done: Int, partial: Int, tracked: Int)] = [:]
+        var buckets: [UUID: (title: String, done: Int, partial: Int, tracked: Int, score: Double)] = [:]
         var dayBars: [ReportDayBar] = []
         
         for date in dates {
@@ -1011,13 +1162,14 @@ final class DataStore {
                 label: labelFormatter.string(from: date),
                 percent: Int((summary.completionPercentage * 100).rounded())
             ))
-            for entry in summary.entries {
+            for (entry, value) in zip(summary.entries, summary.progressValues) {
                 let title = goals.first(where: { $0.id == entry.goalId })?.title ?? "Task"
-                var bucket = buckets[entry.goalId] ?? (title, 0, 0, 0)
+                var bucket = buckets[entry.goalId] ?? (title, 0, 0, 0, 0)
                 bucket.tracked += 1
-                if entry.status == .done {
+                bucket.score += value
+                if value >= 1 {
                     bucket.done += 1
-                } else if entry.status == .partial {
+                } else if value > 0 {
                     bucket.partial += 1
                 }
                 buckets[entry.goalId] = bucket
@@ -1030,8 +1182,7 @@ final class DataStore {
                 if bucket.tracked == 0 {
                     percent = 0
                 } else {
-                    let score = Double(bucket.done) + Double(bucket.partial) * 0.5
-                    percent = Int((score / Double(bucket.tracked) * 100).rounded())
+                    percent = Int((bucket.score / Double(bucket.tracked) * 100).rounded())
                 }
                 return ReportTaskBar(
                     title: bucket.title,
@@ -1382,7 +1533,8 @@ final class DataStore {
             guard entry.goalId == goalId else { continue }
             let day = GoalEntry.startOfCivilDay(for: entry.date)
             guard day >= start && day <= end else { continue }
-            total += entry.status.value
+            let goal = goalDefinition(goalId, on: day) ?? Goal(id: goalId, title: "")
+            total += entry.progressValue(for: goal)
         }
         return total
     }
@@ -1512,7 +1664,11 @@ final class DataStore {
         let relevant = linked.intersection(trackedIds)
         guard !relevant.isEmpty else { return .skipped }
         
-        let values = relevant.map { getEntry(for: $0, on: date).status.value }
+        let values = relevant.map { id in
+            let entry = getEntry(for: id, on: date)
+            let goal = goalsForDay(date).tracked.first { $0.id == id } ?? Goal(id: id, title: "")
+            return entry.progressValue(for: goal)
+        }
         let average = values.reduce(0, +) / Double(values.count)
         if average >= 1 { return .done }
         if average > 0 { return .partial }

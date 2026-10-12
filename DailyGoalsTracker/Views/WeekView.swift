@@ -127,18 +127,29 @@ struct WeekView: View {
             .help(goal.title)
             
             ForEach(weekDates, id: \.self) { date in
-                let tracked = dataStore.isGoalTracked(goal, on: date)
-                let entry = dataStore.getEntry(for: goal.id, on: date)
-                
-                if tracked {
+                if let dayGoal = dataStore.goalsForDay(date).tracked.first(where: { $0.id == goal.id }) {
+                    let entry = dataStore.getEntry(for: goal.id, on: date)
                     Button {
-                        dataStore.cycleStatus(for: goal.id, on: date)
+                        switch dayGoal.kind {
+                        case .checklist:
+                            dataStore.cycleStatus(for: goal.id, on: date)
+                        case .percent:
+                            dataStore.bumpPercent(for: goal.id, on: date)
+                        case .count, .hours:
+                            dataStore.bumpAmount(for: goal.id, on: date)
+                        }
                     } label: {
-                        StatusDot(status: entry.status, size: 14)
+                        ProgressDot(
+                            progress: entry.progressValue(for: dayGoal),
+                            overLimit: dayGoal.isOverHourLimit(entry.resolvedAmount(for: dayGoal)),
+                            size: 14
+                        )
                             .frame(width: dayColumnWidth, height: rowHeight)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .help(entry.weekHelp(for: dayGoal))
+                    .accessibilityLabel("\(goal.title), \(entry.progressDescription(for: dayGoal))")
                 } else {
                     Text("–")
                         .font(.system(size: 11, weight: .medium))

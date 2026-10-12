@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -11,6 +12,14 @@ struct DailyGoalsTrackerApp: App {
             EmptyView()
         }
         .commands {
+            CommandGroup(after: .textEditing) {
+                Button("Show Spelling and Grammar") {
+                    NSApp.sendAction(#selector(NSText.showGuessPanel(_:)), to: nil, from: nil)
+                }
+                Button("Check Document Now") {
+                    NSApp.sendAction(#selector(NSTextView.checkTextInDocument(_:)), to: nil, from: nil)
+                }
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
                     appDelegate.showSettingsWindow()

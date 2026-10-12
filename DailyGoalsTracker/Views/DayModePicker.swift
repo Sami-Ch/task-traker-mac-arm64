@@ -76,9 +76,11 @@ struct DayModePicker: View {
     }
 }
 
-/// Collapsed list of goals skipped on a special day.
+/// Collapsed list of goals skipped on a special day. Each one can be added back.
 struct SkippedGoalsSection: View {
     let goals: [Goal]
+    let date: Date
+    @Environment(DataStore.self) private var dataStore
     @State private var isExpanded = false
     
     var body: some View {
@@ -114,15 +116,24 @@ struct SkippedGoalsSection: View {
                                 GoalIconView(icon: goal.icon, size: 10, isActive: false)
                                 Text(goal.title)
                                     .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                                    .strikethrough(true, color: Color.secondary.opacity(0.5))
-                                Spacer()
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                Button {
+                                    dataStore.addGoalOverride(goal.id, on: date)
+                                } label: {
+                                    Text("Add back")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .help("Track \(goal.title) on this day")
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 4)
                         }
                     }
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 6)
                 }
             }
             .background(Color.gray.opacity(0.06))

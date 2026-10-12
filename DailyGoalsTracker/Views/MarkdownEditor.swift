@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 // MARK: - Rich Text Helpers
@@ -37,8 +38,8 @@ enum JournalParagraphStyle: String, CaseIterable, Identifiable {
     
     var textColor: NSColor {
         switch self {
-        case .quote: return .secondaryLabelColor
-        default: return .textColor
+        case .quote: return JournalPageColors.quoteInk
+        default: return JournalPageColors.ink
         }
     }
     
@@ -80,6 +81,103 @@ enum JournalParagraphStyle: String, CaseIterable, Identifiable {
             .foregroundColor: textColor,
             .paragraphStyle: paragraphStyle()
         ]
+    }
+}
+
+/// Text colors in the toolbar. "Default" follows the system label color.
+enum JournalTextColor: String, CaseIterable, Identifiable {
+    case automatic = "Default"
+    case gray = "Gray"
+    case red = "Red"
+    case orange = "Orange"
+    case yellow = "Yellow"
+    case green = "Green"
+    case blue = "Blue"
+    case purple = "Purple"
+    case pink = "Pink"
+    
+    var id: String { rawValue }
+    
+    var nsColor: NSColor {
+        switch self {
+        case .automatic: return .textColor
+        case .gray: return .secondaryLabelColor
+        case .red: return .systemRed
+        case .orange: return .systemOrange
+        case .yellow: return .systemYellow
+        case .green: return .systemGreen
+        case .blue: return .systemBlue
+        case .purple: return .systemPurple
+        case .pink: return .systemPink
+        }
+    }
+    
+    var swiftUIColor: Color { Color(nsColor: nsColor) }
+}
+
+/// Resolved journal page and ink colors.
+enum JournalPageColors {
+    /// Soft paper. Pure white in light mode is harsher to read for long stretches.
+    static let warm = NSColor(srgbRed: 0.965, green: 0.953, blue: 0.933, alpha: 1)
+    static let sepia = NSColor(srgbRed: 0.957, green: 0.925, blue: 0.855, alpha: 1)
+    static let mist = NSColor(srgbRed: 0.925, green: 0.941, blue: 0.957, alpha: 1)
+    /// Near-black. Easier on a light page than pure black, still well above reading contrast.
+    static let lightInk = NSColor(srgbRed: 0.145, green: 0.145, blue: 0.165, alpha: 1)
+    static let darkInk = NSColor(srgbRed: 0.93, green: 0.93, blue: 0.94, alpha: 1)
+    
+    /// Foreground used for new body text. Updated when the page color changes.
+    static var ink: NSColor = .textColor
+    static var quoteInk: NSColor = .secondaryLabelColor
+    
+    static func paper(for choice: JournalPaper, custom: JournalRGB?, scheme: ColorScheme) -> NSColor {
+        switch choice {
+        case .automatic:
+            return scheme == .dark ? .textBackgroundColor : warm
+        case .white:
+            return .white
+        case .warm:
+            return warm
+        case .sepia:
+            return sepia
+        case .mist:
+            return mist
+        case .custom:
+            return custom?.nsColor ?? warm
+        }
+    }
+    
+    static func ink(for paper: NSColor, choice: JournalPaper, scheme: ColorScheme) -> NSColor {
+        if choice == .automatic {
+            return scheme == .dark ? .textColor : lightInk
+        }
+        return isLight(paper) ? lightInk : darkInk
+    }
+    
+    static func quoteInk(for ink: NSColor) -> NSColor {
+        ink.withAlphaComponent(0.75)
+    }
+    
+    static func isLight(_ color: NSColor) -> Bool {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return true }
+        let luminance = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
+        return luminance > 0.62
+    }
+    
+    /// Body text that should follow the page, not a color the user picked.
+    static func isAutomaticBody(_ color: NSColor, ink: NSColor) -> Bool {
+        let known: [NSColor] = [.textColor, .labelColor, .black, .white, lightInk, darkInk, ink]
+        return known.contains { color.isClose(to: $0, tolerance: 0.06) }
+    }
+}
+
+extension JournalRGB {
+    var nsColor: NSColor {
+        NSColor(srgbRed: CGFloat(red), green: CGFloat(green), blue: CGFloat(blue), alpha: 1)
+    }
+    
+    init(nsColor: NSColor) {
+        let rgb = nsColor.usingColorSpace(.sRGB) ?? nsColor
+        self.init(red: Double(rgb.redComponent), green: Double(rgb.greenComponent), blue: Double(rgb.blueComponent))
     }
 }
 
@@ -153,10 +251,12 @@ enum JournalRichText {
     static func fromMarkdown(_ source: String) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let lines = source.components(separatedBy: "\n")
+        var activeList: (format: NSTextList.MarkerFormat, list: NSTextList)?
         
         for (index, line) in lines.enumerated() {
             var processedLine = line
             var style = JournalParagraphStyle.normal
+            var listFormat: NSTextList.MarkerFormat?
             
             // Handle headings
             if let match = processedLine.range(of: #"^#{1,6}\s+"#, options: .regularExpression) {
@@ -173,19 +273,37 @@ enum JournalRichText {
                 processedLine = String(processedLine.dropFirst(2))
                 style = .quote
             }
-            // Handle bullet lists - convert to bullet character
             else if let match = processedLine.range(of: #"^[-*+]\s+"#, options: .regularExpression) {
-                processedLine = "• " + String(processedLine[match.upperBound...])
+                processedLine = String(processedLine[match.upperBound...])
+                listFormat = .disc
+            } else if let match = processedLine.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) {
+                processedLine = String(processedLine[match.upperBound...])
+                listFormat = JournalTextLists.numberedMarker
             }
-            
-            let lineAttr = NSMutableAttributedString(string: processedLine, attributes: style.attributes())
+
+            if let listFormat {
+                if activeList?.format != listFormat {
+                    activeList = (listFormat, NSTextList(markerFormat: listFormat, options: 0))
+                }
+            } else {
+                activeList = nil
+            }
+
+            let paragraph = style.paragraphStyle()
+            if let list = activeList?.list {
+                paragraph.textLists = [list]
+                JournalTextLists.applyIndent(paragraph)
+            }
+            var attributes = style.attributes()
+            attributes[.paragraphStyle] = paragraph
+            let lineAttr = NSMutableAttributedString(string: processedLine, attributes: attributes)
             
             // Apply inline formatting
             applyInlineFormatting(to: lineAttr, baseFont: style.font())
             
             result.append(lineAttr)
             if index < lines.count - 1 {
-                result.append(NSAttributedString(string: "\n", attributes: style.attributes()))
+                result.append(NSAttributedString(string: "\n", attributes: attributes))
             }
         }
         
@@ -286,7 +404,18 @@ enum JournalRichText {
                 var effectiveRange = NSRange()
                 let attrs = attrString.attributes(at: nsRange.location, effectiveRange: &effectiveRange)
                 
-                if let font = attrs[.font] as? NSFont {
+                if let paragraphStyle = attrs[.paragraphStyle] as? NSParagraphStyle,
+                   let list = paragraphStyle.textLists.last {
+                    let indent = String(repeating: "  ", count: max(0, paragraphStyle.textLists.count - 1))
+                    let indentMarker: String
+                    if list.isOrdered {
+                        let number = max(1, attrString.itemNumber(in: list, at: nsRange.location))
+                        indentMarker = "\(number). "
+                    } else {
+                        indentMarker = "- "
+                    }
+                    mdLine = "\(indent)\(indentMarker)"
+                } else if let font = attrs[.font] as? NSFont {
                     let fontSize = font.pointSize
                     let isBold = NSFontManager.shared.traits(of: font).contains(.boldFontMask)
                     
@@ -299,10 +428,8 @@ enum JournalRichText {
                     }
                 }
                 
-                if let paragraphStyle = attrs[.paragraphStyle] as? NSParagraphStyle {
-                    if paragraphStyle.headIndent > 0 {
-                        mdLine = "> "
-                    }
+                if mdLine.isEmpty, let paragraphStyle = attrs[.paragraphStyle] as? NSParagraphStyle, paragraphStyle.headIndent > 0 {
+                    mdLine = "> "
                 }
             }
             
@@ -395,6 +522,284 @@ enum JournalMarkdown {
     }
 }
 
+// MARK: - Text lists
+
+/// Bullet and numbered lists use `NSTextList` on TextKit 2.
+/// The text view draws the markers and, on Return, Tab, and Shift-Tab, continues,
+/// exits, and nests them. Item numbers come from the shared list object, so a
+/// selection of several paragraphs stays sequential without a hand-rolled counter.
+enum JournalTextLists {
+    /// Word and Docs use "1." AppKit's built-in `.decimal` marker is just "1".
+    /// The format string is still an `NSTextList`, so Return keeps numbering.
+    static let numberedMarker = NSTextList.MarkerFormat(rawValue: "{decimal}.")
+    static let bulletMarker = NSTextList.MarkerFormat.disc
+    private static let indentStep: CGFloat = 36
+    private static let legacyMarker = try! NSRegularExpression(
+        pattern: #"^(?:•\s+|[-*+]\s+|\d+\.\s+)"#
+    )
+    
+    static func applyIndent(_ style: NSMutableParagraphStyle) {
+        let level = style.textLists.count
+        if level == 0 {
+            style.headIndent = 0
+            style.firstLineHeadIndent = 0
+        } else {
+            style.headIndent = CGFloat(level) * indentStep
+            style.firstLineHeadIndent = CGFloat(level - 1) * indentStep
+        }
+    }
+    
+    static func containsList(_ text: NSAttributedString) -> Bool {
+        guard text.length > 0 else { return false }
+        var found = false
+        text.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+            if let style = value as? NSParagraphStyle, !style.textLists.isEmpty {
+                found = true
+                stop.pointee = true
+            }
+        }
+        return found
+    }
+    
+    /// Turns old "`• `" / "`1. `" prefixes into real list paragraphs so Return keeps numbering.
+    static func normalizeLegacyMarkers(_ source: NSAttributedString) -> NSAttributedString {
+        let text = source.string as NSString
+        guard text.length > 0 else { return source }
+        
+        var groups: [(NSTextList.MarkerFormat, [NSRange])] = []
+        var location = 0
+        while location < text.length {
+            let paragraph = text.paragraphRange(for: NSRange(location: location, length: 0))
+            let style = source.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil) as? NSParagraphStyle
+            if style?.textLists.isEmpty != false, let format = legacyFormat(of: text.substring(with: paragraph)) {
+                if groups.last?.0 == format {
+                    groups[groups.count - 1].1.append(paragraph)
+                } else {
+                    groups.append((format, [paragraph]))
+                }
+            }
+            let next = NSMaxRange(paragraph)
+            if next <= location { break }
+            location = next
+        }
+        guard !groups.isEmpty else { return source }
+        
+        let result = NSMutableAttributedString(attributedString: source)
+        for group in groups.reversed() {
+            let list = NSTextList(markerFormat: group.0, options: 0)
+            for paragraph in group.1.reversed() {
+                stripLegacyMarker(from: paragraph, in: result)
+                guard result.length > 0 else { continue }
+                let location = min(paragraph.location, result.length - 1)
+                let updated = (result.string as NSString).paragraphRange(for: NSRange(location: location, length: 0))
+                setList(list, on: updated, in: result)
+            }
+        }
+        return result
+    }
+    
+    /// Copy used by Word export. AppKit's docx writer does not emit numbering,
+    /// so the markers have to be real characters in that file.
+    static func withPrintedMarkers(_ source: NSAttributedString) -> NSAttributedString {
+        let text = source.string as NSString
+        guard text.length > 0, containsList(source) else { return source }
+        let result = NSMutableAttributedString()
+        var location = 0
+        while location < text.length {
+            let paragraph = text.paragraphRange(for: NSRange(location: location, length: 0))
+            let chunk = source.attributedSubstring(from: paragraph)
+            if chunk.length > 0,
+               let style = chunk.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle,
+               let list = style.textLists.last {
+                let item = max(1, source.itemNumber(in: list, at: paragraph.location))
+                let token = list.marker(forItemNumber: item) + " "
+                let indent = String(repeating: "\t", count: max(0, style.textLists.count - 1))
+                result.append(NSAttributedString(string: indent + token, attributes: chunk.attributes(at: 0, effectiveRange: nil)))
+            }
+            result.append(chunk)
+            let next = NSMaxRange(paragraph)
+            if next <= location { break }
+            location = next
+        }
+        return result
+    }
+    
+    static func toggle(_ format: NSTextList.MarkerFormat, in textView: NSTextView) {
+        guard let storage = textView.textStorage else { return }
+        if storage.length == 0 {
+            installEmptyParagraph(format, in: textView)
+            return
+        }
+        
+        let text = storage.string as NSString
+        var selection = textView.selectedRange()
+        if selection.location >= text.length {
+            selection = NSRange(location: text.length - 1, length: 0)
+        }
+        let paragraphs = paragraphRanges(in: text, covering: selection)
+        guard let first = paragraphs.first else { return }
+        let covered = NSRange(location: first.location, length: NSMaxRange(paragraphs[paragraphs.count - 1]) - first.location)
+        let remove = paragraphs.allSatisfy { innermostFormat(at: $0, in: storage) == format }
+        
+        guard textView.shouldChangeText(in: covered, replacementString: nil) else { return }
+        textView.undoManager?.beginUndoGrouping()
+        storage.beginEditing()
+        if remove {
+            for paragraph in paragraphs.reversed() {
+                removeInnermostList(on: paragraph, in: storage)
+            }
+        } else {
+            let list = existingList(before: first.location, format: format, in: storage)
+                ?? NSTextList(markerFormat: format, options: 0)
+            for paragraph in paragraphs.reversed() {
+                if innermostFormat(at: paragraph, in: storage) == nil {
+                    stripLegacyMarker(from: paragraph, in: storage)
+                }
+                if storage.length == 0 {
+                    storage.setAttributedString(emptyListParagraph(list))
+                    continue
+                }
+                let location = min(paragraph.location, storage.length - 1)
+                let updated = (storage.string as NSString).paragraphRange(for: NSRange(location: location, length: 0))
+                setList(list, on: updated, in: storage)
+            }
+        }
+        storage.endEditing()
+        clampSelection(in: textView)
+        textView.didChangeText()
+        restoreTypingAttributes(in: textView)
+        textView.undoManager?.endUndoGrouping()
+    }
+    
+    private static func emptyListParagraph(_ list: NSTextList) -> NSAttributedString {
+        let paragraph = JournalParagraphStyle.normal.paragraphStyle()
+        paragraph.textLists = [list]
+        applyIndent(paragraph)
+        var attributes = JournalRichText.defaultAttributes()
+        attributes[.paragraphStyle] = paragraph
+        return NSAttributedString(string: "\n", attributes: attributes)
+    }
+    
+    private static func installEmptyParagraph(_ format: NSTextList.MarkerFormat, in textView: NSTextView) {
+        guard let storage = textView.textStorage else { return }
+        let replacement = emptyListParagraph(NSTextList(markerFormat: format, options: 0))
+        guard textView.shouldChangeText(in: NSRange(location: 0, length: 0), replacementString: "\n") else { return }
+        textView.undoManager?.beginUndoGrouping()
+        storage.setAttributedString(replacement)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        textView.didChangeText()
+        restoreTypingAttributes(in: textView)
+        textView.undoManager?.endUndoGrouping()
+    }
+    
+    private static func paragraphRanges(in string: NSString, covering range: NSRange) -> [NSRange] {
+        guard string.length > 0 else { return [] }
+        var probe = range
+        if probe.location >= string.length {
+            probe = NSRange(location: string.length - 1, length: 0)
+        }
+        let span = string.paragraphRange(for: probe)
+        var ranges: [NSRange] = []
+        var location = span.location
+        let end = NSMaxRange(span)
+        while location < end {
+            let paragraph = string.paragraphRange(for: NSRange(location: location, length: 0))
+            ranges.append(paragraph)
+            let next = NSMaxRange(paragraph)
+            if next <= location { break }
+            location = next
+        }
+        return ranges
+    }
+    
+    private static func innermostFormat(at paragraph: NSRange, in text: NSAttributedString) -> NSTextList.MarkerFormat? {
+        guard paragraph.location < text.length else { return nil }
+        let style = text.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil) as? NSParagraphStyle
+        return style?.textLists.last?.markerFormat
+    }
+    
+    private static func existingList(before location: Int, format: NSTextList.MarkerFormat, in text: NSAttributedString) -> NSTextList? {
+        guard location > 0, location <= text.length else { return nil }
+        let previous = (text.string as NSString).paragraphRange(for: NSRange(location: location - 1, length: 0))
+        guard previous.location < location,
+              let style = text.attribute(.paragraphStyle, at: previous.location, effectiveRange: nil) as? NSParagraphStyle,
+              let list = style.textLists.last,
+              list.markerFormat == format else { return nil }
+        return list
+    }
+    
+    private static func setList(_ list: NSTextList, on paragraph: NSRange, in text: NSMutableAttributedString) {
+        guard paragraph.location < text.length, paragraph.length > 0 else { return }
+        let existing = text.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil) as? NSParagraphStyle
+        let style = (existing?.mutableCopy() as? NSMutableParagraphStyle) ?? JournalParagraphStyle.normal.paragraphStyle()
+        var lists = style.textLists
+        if lists.isEmpty {
+            lists = [list]
+        } else {
+            lists[lists.count - 1] = list
+        }
+        style.textLists = lists
+        applyIndent(style)
+        text.addAttribute(.paragraphStyle, value: style, range: paragraph)
+    }
+    
+    private static func removeInnermostList(on paragraph: NSRange, in text: NSMutableAttributedString) {
+        guard paragraph.location < text.length, paragraph.length > 0,
+              let existing = text.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil) as? NSParagraphStyle,
+              !existing.textLists.isEmpty else { return }
+        let style = existing.mutableCopy() as! NSMutableParagraphStyle
+        var lists = style.textLists
+        lists.removeLast()
+        style.textLists = lists
+        applyIndent(style)
+        text.addAttribute(.paragraphStyle, value: style, range: paragraph)
+    }
+    
+    private static func stripLegacyMarker(from paragraph: NSRange, in text: NSMutableAttributedString) {
+        guard paragraph.location < text.length else { return }
+        let current = text.string as NSString
+        let slice = current.substring(with: paragraph)
+        let markerLength = legacyMarkerLength(in: slice)
+        guard markerLength > 0, paragraph.location + markerLength <= current.length else { return }
+        text.replaceCharacters(in: NSRange(location: paragraph.location, length: markerLength), with: "")
+    }
+    
+    private static func legacyFormat(of paragraph: String) -> NSTextList.MarkerFormat? {
+        let body = paragraph.hasSuffix("\n") ? String(paragraph.dropLast()) : paragraph
+        if body.range(of: #"^\d+\.\s+"#, options: .regularExpression) != nil { return numberedMarker }
+        if body.range(of: #"^(?:•|[-*+])\s+"#, options: .regularExpression) != nil { return .disc }
+        return nil
+    }
+    
+    private static func legacyMarkerLength(in paragraph: String) -> Int {
+        let body = paragraph.hasSuffix("\n") ? String(paragraph.dropLast()) : paragraph
+        let ns = body as NSString
+        guard ns.length > 0,
+              let match = legacyMarker.firstMatch(in: body, range: NSRange(location: 0, length: ns.length)),
+              match.range.location == 0 else { return 0 }
+        return match.range.length
+    }
+    
+    private static func clampSelection(in textView: NSTextView) {
+        guard let storage = textView.textStorage else { return }
+        var selected = textView.selectedRange()
+        if selected.location > storage.length { selected.location = storage.length }
+        if NSMaxRange(selected) > storage.length {
+            selected.length = storage.length - selected.location
+        }
+        textView.setSelectedRange(selected)
+    }
+    
+    private static func restoreTypingAttributes(in textView: NSTextView) {
+        guard let storage = textView.textStorage, storage.length > 0 else { return }
+        let location = min(max(0, textView.selectedRange().location), storage.length - 1)
+        guard let style = storage.attribute(.paragraphStyle, at: location, effectiveRange: nil) else { return }
+        var typing = textView.typingAttributes
+        typing[.paragraphStyle] = style
+        textView.typingAttributes = typing
+    }
+}
+
 // MARK: - Rich Text Editing Session
 
 @Observable
@@ -407,19 +812,33 @@ final class RichTextEditingSession {
     var isUnderline = false
     var isStrikethrough = false
     var currentHighlight: HighlightColor = .none
+    var textColor: Color = .primary
+    var pageInk: NSColor = .textColor
+    private var colorPanelObserver: NSObjectProtocol?
+    var isAdjustingPageColors = false
     var currentFontSize: CGFloat = 16
     var currentParagraphStyle: JournalParagraphStyle = .normal
     var currentLineSpacing: LineSpacing = .single
     var hasFirstLineIndent = false
+    var isBulletList = false
+    var isNumberedList = false
     var wordCount = 0
     var characterCount = 0
     var selectionWordCount: Int?
     var isEmpty = true
     
-    /// Updates the in-memory document immediately. Disk writes stay debounced.
-    var onLiveUpdate: ((NSAttributedString) -> Void)?
-    /// Writes the document to storage for the day that was open when editing started.
-    var persistHandler: ((NSAttributedString, Date) -> Void)?
+    /// Writes the document for the day that was open when editing started.
+    /// Returns an error message, or nil when the day was saved.
+    var persistHandler: ((NSAttributedString, Date) -> String?)?
+    var savePhase: JournalSavePhase = .saved
+    private var editGeneration = 0
+    private var stagedDocument: NSAttributedString?
+    private var stagedGeneration = 0
+    private var appliedGeneration = 0
+    /// Previous / next journal day (from Settings → Shortcuts).
+    var onCommandArrowDay: ((Int) -> Void)?
+    var previousDayChord: KeyChord = .journalPreviousDayDefault
+    var nextDayChord: KeyChord = .journalNextDayDefault
     /// The day currently shown in the text view.
     var boundDate: Date?
     private var persistTimer: Timer?
@@ -443,19 +862,36 @@ final class RichTextEditingSession {
     /// Save the text view's current contents for `boundDate`.
     func persistNow() {
         cancelPendingPersist()
-        guard let snap = snapshot(), let date = boundDate else { return }
-        onLiveUpdate?(snap)
-        persistHandler?(snap, date)
+        guard let date = boundDate else { return }
+        editGeneration += 1
+        savePhase = .saving
+        write(generation: editGeneration, date: date)
     }
     
     func schedulePersist() {
         updateSelectionState()
-        guard let snap = snapshot(), let date = boundDate else { return }
-        onLiveUpdate?(snap)
+        if isAdjustingPageColors { return }
+        guard let date = boundDate else { return }
+        editGeneration += 1
+        let generation = editGeneration
+        savePhase = .saving
         cancelPendingPersist()
         persistTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: false) { [weak self] _ in
-            guard let self, let latest = self.snapshot() else { return }
-            self.persistHandler?(latest, date)
+            self?.write(generation: generation, date: date)
+        }
+    }
+    
+    private func write(generation: Int, date: Date) {
+        guard let latest = snapshot() else {
+            if editGeneration == generation { savePhase = .saved }
+            return
+        }
+        let error = persistHandler?(latest, date)
+        guard editGeneration == generation else { return }
+        if let error {
+            savePhase = .failed(error)
+        } else {
+            savePhase = .saved
         }
     }
     
@@ -463,23 +899,38 @@ final class RichTextEditingSession {
     func loadDocument(_ document: NSAttributedString) {
         persistTimer?.invalidate()
         persistTimer = nil
-        guard let textView, let storage = textView.textStorage else { return }
+        stagedDocument = document
+        stagedGeneration += 1
+        applyStagedDocument()
+    }
+    
+    /// Applies a staged day only when the text view exists and the day actually changed.
+    func applyStagedDocument() {
+        guard stagedGeneration != appliedGeneration,
+              let stagedDocument,
+              let textView,
+              let storage = textView.textStorage else { return }
+        appliedGeneration = stagedGeneration
         
         let content: NSAttributedString
-        if document.length == 0 {
+        if stagedDocument.length == 0 {
             content = NSAttributedString(string: "", attributes: JournalRichText.defaultAttributes())
         } else {
-            content = document
+            content = JournalTextLists.normalizeLegacyMarkers(stagedDocument)
         }
         
         storage.setAttributedString(content)
-        textView.typingAttributes = JournalRichText.defaultAttributes()
-        let end = (storage.string as NSString).length
+        recolorAutomaticBody(in: storage, ink: pageInk)
+        var typing = JournalRichText.defaultAttributes()
+        typing[.foregroundColor] = pageInk
+        textView.typingAttributes = typing
+        let end = storage.length
         textView.setSelectedRange(NSRange(location: min(end, storage.length), length: 0))
         updateSelectionState()
         textView.needsDisplay = true
         textView.window?.makeFirstResponder(textView)
         textView.updateInsertionPointStateAndRestartTimer(true)
+        (textView as? JournalRichTextView)?.startSpellChecking()
     }
     
     func updateSelectionState() {
@@ -488,7 +939,7 @@ final class RichTextEditingSession {
         let words = fullText.split { $0.isWhitespace || $0.isNewline }.filter { !$0.isEmpty }
         wordCount = words.count
         characterCount = fullText.count
-        isEmpty = words.isEmpty
+        isEmpty = words.isEmpty && !JournalTextLists.containsList(textStorage)
         
         let range = textView.selectedRange()
         if range.length > 0, NSMaxRange(range) <= textStorage.length {
@@ -506,14 +957,19 @@ final class RichTextEditingSession {
             currentHighlight = .none
             currentFontSize = 16
             currentParagraphStyle = .normal
+            isBulletList = false
+            isNumberedList = false
+            textColor = typingColor
             return
         }
         
         let checkLocation: Int
         if range.length > 0 {
             checkLocation = min(range.location, textStorage.length - 1)
+        } else if range.location < textStorage.length {
+            checkLocation = range.location
         } else {
-            checkLocation = min(max(0, range.location - 1), textStorage.length - 1)
+            checkLocation = textStorage.length - 1
         }
         
         let attrs = textStorage.attributes(at: checkLocation, effectiveRange: nil)
@@ -534,6 +990,12 @@ final class RichTextEditingSession {
             else { currentParagraphStyle = .normal }
         }
         
+        if let color = attrs[.foregroundColor] as? NSColor {
+            textColor = Color(nsColor: color)
+        } else {
+            textColor = .primary
+        }
+        
         isUnderline = (attrs[.underlineStyle] as? Int) == NSUnderlineStyle.single.rawValue
         isStrikethrough = (attrs[.strikethroughStyle] as? Int) == NSUnderlineStyle.single.rawValue
         
@@ -548,10 +1010,17 @@ final class RichTextEditingSession {
             currentHighlight = .none
         }
         
-        // Check paragraph style
+        isBulletList = false
+        isNumberedList = false
         if let paragraphStyle = attrs[.paragraphStyle] as? NSParagraphStyle {
-            hasFirstLineIndent = paragraphStyle.firstLineHeadIndent > 20
-            if paragraphStyle.headIndent > 0 && currentParagraphStyle == .normal {
+            let lists = paragraphStyle.textLists
+            if lists.last?.isOrdered == true {
+                isNumberedList = true
+            } else if lists.last != nil {
+                isBulletList = true
+            }
+            hasFirstLineIndent = paragraphStyle.firstLineHeadIndent > 20 && lists.isEmpty
+            if paragraphStyle.headIndent > 0 && lists.isEmpty && currentParagraphStyle == .normal {
                 currentParagraphStyle = .quote
             }
             let baseSize = max(currentFontSize, 1)
@@ -581,13 +1050,17 @@ final class RichTextEditingSession {
             return
         }
         
+        guard textView.shouldChangeText(in: range, replacementString: nil) else { return }
         textView.undoManager?.beginUndoGrouping()
+        textStorage.beginEditing()
         textStorage.enumerateAttribute(.font, in: range, options: []) { value, subRange, _ in
             if let font = value as? NSFont {
                 let newFont = NSFontManager.shared.convert(font, toHaveTrait: isBold ? .unboldFontMask : .boldFontMask)
                 textStorage.addAttribute(.font, value: newFont, range: subRange)
             }
         }
+        textStorage.endEditing()
+        textView.didChangeText()
         textView.undoManager?.endUndoGrouping()
         updateSelectionState()
     }
@@ -606,13 +1079,17 @@ final class RichTextEditingSession {
             return
         }
         
+        guard textView.shouldChangeText(in: range, replacementString: nil) else { return }
         textView.undoManager?.beginUndoGrouping()
+        textStorage.beginEditing()
         textStorage.enumerateAttribute(.font, in: range, options: []) { value, subRange, _ in
             if let font = value as? NSFont {
                 let newFont = NSFontManager.shared.convert(font, toHaveTrait: isItalic ? .unitalicFontMask : .italicFontMask)
                 textStorage.addAttribute(.font, value: newFont, range: subRange)
             }
         }
+        textStorage.endEditing()
+        textView.didChangeText()
         textView.undoManager?.endUndoGrouping()
         updateSelectionState()
     }
@@ -630,8 +1107,10 @@ final class RichTextEditingSession {
             return
         }
         
+        guard textView.shouldChangeText(in: range, replacementString: nil) else { return }
         textView.undoManager?.beginUndoGrouping()
         textStorage.addAttribute(.underlineStyle, value: newValue, range: range)
+        textView.didChangeText()
         textView.undoManager?.endUndoGrouping()
         updateSelectionState()
     }
@@ -649,10 +1128,107 @@ final class RichTextEditingSession {
             return
         }
         
+        guard textView.shouldChangeText(in: range, replacementString: nil) else { return }
         textView.undoManager?.beginUndoGrouping()
         textStorage.addAttribute(.strikethroughStyle, value: newValue, range: range)
+        textView.didChangeText()
         textView.undoManager?.endUndoGrouping()
         updateSelectionState()
+    }
+    
+    /// Paints the page and keeps default body text readable on it. Chosen text colors stay put.
+    func applyPage(paper: NSColor, ink: NSColor) {
+        pageInk = ink
+        JournalPageColors.ink = ink
+        JournalPageColors.quoteInk = JournalPageColors.quoteInk(for: ink)
+        
+        guard let textView else { return }
+        if let view = textView as? JournalRichTextView {
+            view.pageBackground = paper
+            view.pageInk = ink
+            view.applyPageColors()
+        } else {
+            textView.backgroundColor = paper
+            textView.insertionPointColor = ink
+            textView.enclosingScrollView?.backgroundColor = paper
+        }
+        
+        var typing = textView.typingAttributes
+        if let current = typing[.foregroundColor] as? NSColor {
+            if JournalPageColors.isAutomaticBody(current, ink: ink) {
+                typing[.foregroundColor] = ink
+            }
+        } else {
+            typing[.foregroundColor] = ink
+        }
+        textView.typingAttributes = typing
+        
+        if let storage = textView.textStorage, storage.length > 0 {
+            recolorAutomaticBody(in: storage, ink: ink)
+        }
+        updateSelectionState()
+    }
+    
+    private func recolorAutomaticBody(in storage: NSTextStorage, ink: NSColor) {
+        isAdjustingPageColors = true
+        textView?.undoManager?.disableUndoRegistration()
+        storage.beginEditing()
+        storage.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: storage.length)) { value, subRange, _ in
+            guard let color = value as? NSColor else { return }
+            guard JournalPageColors.isAutomaticBody(color, ink: ink) else { return }
+            if color.isClose(to: ink, tolerance: 0.02) { return }
+            storage.addAttribute(.foregroundColor, value: ink, range: subRange)
+        }
+        storage.endEditing()
+        textView?.undoManager?.enableUndoRegistration()
+        isAdjustingPageColors = false
+    }
+    
+    /// Applies color through `NSTextView.changeColor`, the same path as the system color panel.
+    func setTextColor(_ color: NSColor) {
+        guard let textView else { return }
+        textView.window?.makeFirstResponder(textView)
+        let panel = NSColorPanel.shared
+        panel.color = color
+        textView.changeColor(panel)
+        updateSelectionState()
+    }
+    
+    /// Live system color picker. Changes go to the text view while the panel is open.
+    func showTextColorPanel() {
+        guard let textView else { return }
+        textView.window?.makeFirstResponder(textView)
+        let panel = NSColorPanel.shared
+        panel.showsAlpha = false
+        if let color = textView.typingAttributes[.foregroundColor] as? NSColor {
+            panel.color = color
+        }
+        panel.setTarget(textView)
+        panel.setAction(#selector(NSTextView.changeColor(_:)))
+        panel.orderFront(nil)
+        
+        if colorPanelObserver == nil {
+            let center = NotificationCenter.default
+            colorPanelObserver = center.addObserver(
+                forName: NSColorPanel.colorDidChangeNotification,
+                object: panel,
+                queue: .main
+            ) { [weak self] _ in
+                self?.updateSelectionState()
+            }
+            center.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: panel,
+                queue: .main
+            ) { _ in
+                panel.setTarget(nil)
+            }
+        }
+    }
+    
+    private var typingColor: Color {
+        guard let color = textView?.typingAttributes[.foregroundColor] as? NSColor else { return .primary }
+        return Color(nsColor: color)
     }
     
     func setHighlight(_ highlight: HighlightColor) {
@@ -727,8 +1303,22 @@ final class RichTextEditingSession {
         range = ns.paragraphRange(for: range)
         guard range.length > 0 else { return }
         
+        let template = style.paragraphStyle()
         textView.undoManager?.beginUndoGrouping()
-        textStorage.addAttributes(style.attributes(), range: range)
+        textStorage.beginEditing()
+        textStorage.enumerateAttribute(.paragraphStyle, in: range, options: []) { value, subRange, _ in
+            let paragraph = template.mutableCopy() as! NSMutableParagraphStyle
+            if let existing = value as? NSParagraphStyle, !existing.textLists.isEmpty {
+                paragraph.textLists = existing.textLists
+                paragraph.headIndent = existing.headIndent
+                paragraph.firstLineHeadIndent = existing.firstLineHeadIndent
+            }
+            var attributes = style.attributes()
+            attributes[.paragraphStyle] = paragraph
+            textStorage.addAttributes(attributes, range: subRange)
+        }
+        textStorage.endEditing()
+        textView.didChangeText()
         textView.undoManager?.endUndoGrouping()
         updateSelectionState()
     }
@@ -787,59 +1377,15 @@ final class RichTextEditingSession {
     }
     
     func toggleBulletList() {
-        guard let textView, let textStorage = textView.textStorage else { return }
-        let ns = textStorage.string as NSString
-        var range = textView.selectedRange()
-        range = ns.paragraphRange(for: range)
-        let paragraph = ns.substring(with: range)
-        
-        textView.undoManager?.beginUndoGrouping()
-        
-        if paragraph.hasPrefix("• ") || paragraph.hasPrefix("- ") {
-            // Remove bullet
-            let newText = String(paragraph.dropFirst(2))
-            textStorage.replaceCharacters(in: range, with: newText)
-        } else if paragraph.first?.isNumber == true, let dotIndex = paragraph.firstIndex(of: ".") {
-            // Replace number with bullet
-            let afterDot = paragraph.index(after: dotIndex)
-            if afterDot < paragraph.endIndex && paragraph[afterDot] == " " {
-                let content = String(paragraph[paragraph.index(after: afterDot)...])
-                textStorage.replaceCharacters(in: range, with: "• " + content)
-            }
-        } else {
-            // Add bullet
-            textStorage.replaceCharacters(in: NSRange(location: range.location, length: 0), with: "• ")
-        }
-        
-        textView.undoManager?.endUndoGrouping()
+        guard let textView else { return }
+        JournalTextLists.toggle(JournalTextLists.bulletMarker, in: textView)
+        updateSelectionState()
     }
     
     func toggleNumberedList() {
-        guard let textView, let textStorage = textView.textStorage else { return }
-        let ns = textStorage.string as NSString
-        var range = textView.selectedRange()
-        range = ns.paragraphRange(for: range)
-        let paragraph = ns.substring(with: range)
-        
-        textView.undoManager?.beginUndoGrouping()
-        
-        if paragraph.first?.isNumber == true, let dotIndex = paragraph.firstIndex(of: ".") {
-            // Remove number
-            let afterDot = paragraph.index(after: dotIndex)
-            if afterDot < paragraph.endIndex && paragraph[afterDot] == " " {
-                let content = String(paragraph[paragraph.index(after: afterDot)...])
-                textStorage.replaceCharacters(in: range, with: content)
-            }
-        } else if paragraph.hasPrefix("• ") || paragraph.hasPrefix("- ") {
-            // Replace bullet with number
-            let content = String(paragraph.dropFirst(2))
-            textStorage.replaceCharacters(in: range, with: "1. " + content)
-        } else {
-            // Add number
-            textStorage.replaceCharacters(in: NSRange(location: range.location, length: 0), with: "1. ")
-        }
-        
-        textView.undoManager?.endUndoGrouping()
+        guard let textView else { return }
+        JournalTextLists.toggle(JournalTextLists.numberedMarker, in: textView)
+        updateSelectionState()
     }
     
     func insertLink() {
@@ -902,6 +1448,27 @@ final class RichTextEditingSession {
         textView.undoManager?.beginUndoGrouping()
         textView.textStorage?.replaceCharacters(in: range, with: timestamp)
         textView.undoManager?.endUndoGrouping()
+    }
+    
+    /// Appends a block at the end of the page so existing writing stays put.
+    func insertTaskTemplate(_ template: NSAttributedString) {
+        guard let textView, let storage = textView.textStorage else { return }
+        let block = NSMutableAttributedString()
+        if storage.length > 0 {
+            block.append(NSAttributedString(string: "\n", attributes: JournalRichText.defaultAttributes()))
+        }
+        block.append(template)
+        let range = NSRange(location: storage.length, length: 0)
+        textView.undoManager?.beginUndoGrouping()
+        if textView.shouldChangeText(in: range, replacementString: block.string) {
+            storage.replaceCharacters(in: range, with: block)
+            textView.didChangeText()
+            let end = NSRange(location: storage.length, length: 0)
+            textView.setSelectedRange(end)
+            textView.scrollRangeToVisible(end)
+        }
+        textView.undoManager?.endUndoGrouping()
+        isEmpty = storage.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     
     func insertSceneBreak() {
@@ -1038,11 +1605,11 @@ final class RichTextEditingSession {
             let paragraphRange = ns.paragraphRange(for: NSRange(location: cursorLocation, length: 0))
             
             // Dim all text
-            textStorage.addAttribute(.foregroundColor, value: NSColor.textColor.withAlphaComponent(0.3), range: fullRange)
+            textStorage.addAttribute(.foregroundColor, value: pageInk.withAlphaComponent(0.35), range: fullRange)
             
             // Restore current paragraph
             textStorage.enumerateAttribute(.foregroundColor, in: paragraphRange, options: []) { _, subRange, _ in
-                textStorage.addAttribute(.foregroundColor, value: NSColor.textColor, range: subRange)
+                textStorage.addAttribute(.foregroundColor, value: pageInk, range: subRange)
             }
             
             // Scroll to keep current paragraph visible
@@ -1051,11 +1618,10 @@ final class RichTextEditingSession {
             // Restore all text colors
             textStorage.enumerateAttribute(.foregroundColor, in: fullRange, options: []) { value, subRange, _ in
                 if let color = value as? NSColor, color.alphaComponent < 1 {
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.textColor, range: subRange)
+                    textStorage.addAttribute(.foregroundColor, value: pageInk, range: subRange)
                 }
             }
         }
-        textView.updateInsertionPointStateAndRestartTimer(true)
     }
 }
 
@@ -1063,7 +1629,12 @@ final class RichTextEditingSession {
 
 struct RichTextToolbar: View {
     @Bindable var session: RichTextEditingSession
+    @Environment(\.colorScheme) private var colorScheme
     @State private var hoverTip: String?
+    
+    private var chipFill: Color {
+        Color.primary.opacity(colorScheme == .light ? 0.08 : 0.05)
+    }
     
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -1079,7 +1650,7 @@ struct RichTextToolbar: View {
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 
                 Divider().frame(height: 20)
                 
@@ -1100,7 +1671,7 @@ struct RichTextToolbar: View {
                     .frame(width: 80)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 5)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .onHover { hovering in
@@ -1128,7 +1699,7 @@ struct RichTextToolbar: View {
                     .frame(width: 40)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 5)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .onHover { hovering in
@@ -1147,7 +1718,45 @@ struct RichTextToolbar: View {
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
+                
+                Menu {
+                    ForEach(JournalTextColor.allCases) { choice in
+                        Button {
+                            let color = choice == .automatic ? session.pageInk : choice.nsColor
+                            session.setTextColor(color)
+                        } label: {
+                            HStack {
+                                Circle()
+                                    .fill(choice == .automatic ? Color(nsColor: session.pageInk) : choice.swiftUIColor)
+                                    .frame(width: 12, height: 12)
+                                Text(choice.rawValue)
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Choose Color…") {
+                        session.showTextColorPanel()
+                    }
+                } label: {
+                    VStack(spacing: 1) {
+                        Text("A")
+                            .font(.system(size: 13, weight: .semibold))
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(session.textColor)
+                            .frame(width: 14, height: 3)
+                    }
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 28, height: 26)
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    hoverTip = hovering ? "Text Color" : (hoverTip == "Text Color" ? nil : hoverTip)
+                }
+                .help("Text Color")
+                .padding(.horizontal, 4)
+                .padding(.vertical, 3)
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 
                 // Highlight colors
                 Menu {
@@ -1178,7 +1787,7 @@ struct RichTextToolbar: View {
                 .help("Highlight (⌘⇧H)")
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
-                .background(session.currentHighlight == .none ? Color.primary.opacity(0.04) : session.currentHighlight.swiftUIColor.opacity(0.2), in: RoundedRectangle(cornerRadius: 6))
+                .background(session.currentHighlight == .none ? chipFill : session.currentHighlight.swiftUIColor.opacity(0.2), in: RoundedRectangle(cornerRadius: 6))
                 
                 Divider().frame(height: 20)
                 
@@ -1190,18 +1799,18 @@ struct RichTextToolbar: View {
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 
                 Divider().frame(height: 20)
                 
                 // Lists
                 HStack(spacing: 1) {
-                    toolButton("list.bullet", help: "Bullet List (⌘⇧8)") { session.toggleBulletList() }
-                    toolButton("list.number", help: "Numbered List (⌘⇧7)") { session.toggleNumberedList() }
+                    formatButton("list.bullet", help: "Bullet List (⌘⇧8)", isActive: session.isBulletList) { session.toggleBulletList() }
+                    formatButton("list.number", help: "Numbered List (⌘⇧7)", isActive: session.isNumberedList) { session.toggleNumberedList() }
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 
                 // Line spacing
                 Menu {
@@ -1233,7 +1842,7 @@ struct RichTextToolbar: View {
                 .help("Line spacing")
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 
                 Divider().frame(height: 20)
                 
@@ -1254,7 +1863,7 @@ struct RichTextToolbar: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .onHover { hovering in
@@ -1277,17 +1886,23 @@ struct RichTextToolbar: View {
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 
                 Divider().frame(height: 20)
                 
-                // Focus mode
+                toolButton("textformat.abc", help: "Spelling") {
+                    session.textView?.showGuessPanel(nil)
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 3)
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
+                
                 formatButton("eye", help: "Focus Mode (⌘⇧F)", isActive: session.isFocusModeEnabled) {
                     session.toggleFocusMode()
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
-                .background(session.isFocusModeEnabled ? Color.orange.opacity(0.2) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                .background(session.isFocusModeEnabled ? Color.orange.opacity(0.2) : chipFill, in: RoundedRectangle(cornerRadius: 6))
                 
                 Spacer(minLength: 0)
             }
@@ -1347,29 +1962,31 @@ struct RichTextToolbar: View {
 
 struct RichTextEditor: NSViewRepresentable {
     var session: RichTextEditingSession
-    var document: NSAttributedString
+    var paper: NSColor
+    var ink: NSColor
     
     func makeCoordinator() -> Coordinator {
         Coordinator(session: session)
     }
     
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = JournalScrollView()
+        scroll.contentView = JournalClipView()
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
         scroll.drawsBackground = true
-        scroll.backgroundColor = .textBackgroundColor
+        scroll.backgroundColor = paper
         scroll.borderType = .noBorder
-        let textView = JournalRichTextView()
+        // TextKit 2 draws NSTextList markers and continues them on Return.
+        // The TextKit 1 initializer leaves the markers out of the layout.
+        let textView = JournalRichTextView(usingTextLayoutManager: true)
         textView.session = session
         textView.delegate = context.coordinator
         textView.isRichText = true
         textView.allowsUndo = true
         textView.usesFindBar = true
         textView.usesFindPanel = true
-        textView.isGrammarCheckingEnabled = true
-        textView.isContinuousSpellCheckingEnabled = true
         textView.isAutomaticQuoteSubstitutionEnabled = true
         textView.isAutomaticDashSubstitutionEnabled = true
         textView.isAutomaticTextReplacementEnabled = true
@@ -1377,8 +1994,10 @@ struct RichTextEditor: NSViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.drawsBackground = true
-        textView.backgroundColor = .textBackgroundColor
-        textView.insertionPointColor = .textColor
+        textView.pageBackground = paper
+        textView.pageInk = ink
+        textView.backgroundColor = paper
+        textView.insertionPointColor = ink
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -1389,17 +2008,13 @@ struct RichTextEditor: NSViewRepresentable {
         textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         textView.defaultParagraphStyle = JournalParagraphStyle.normal.paragraphStyle()
         textView.typingAttributes = JournalRichText.defaultAttributes()
-        textView.textStorage?.setAttributedString(document)
+        textView.textStorage?.setAttributedString(JournalRichText.defaultAttributedString())
         
         scroll.documentView = textView
         session.textView = textView
-        
-        DispatchQueue.main.async {
-            guard textView.window != nil else { return }
-            textView.window?.makeFirstResponder(textView)
-            textView.updateInsertionPointStateAndRestartTimer(true)
-            session.updateSelectionState()
-        }
+        session.applyStagedDocument()
+        session.applyPage(paper: paper, ink: ink)
+        textView.startSpellChecking()
         
         return scroll
     }
@@ -1409,11 +2024,19 @@ struct RichTextEditor: NSViewRepresentable {
         textView.session = session
         session.textView = textView
         context.coordinator.session = session
-        textView.centerWritingColumn()
+        session.applyStagedDocument()
+        if !context.coordinator.appliedPaper.isClose(to: paper, tolerance: 0.01)
+            || !context.coordinator.appliedInk.isClose(to: ink, tolerance: 0.01) {
+            context.coordinator.appliedPaper = paper
+            context.coordinator.appliedInk = ink
+            session.applyPage(paper: paper, ink: ink)
+        }
     }
     
     final class Coordinator: NSObject, NSTextViewDelegate {
         var session: RichTextEditingSession
+        var appliedPaper: NSColor = .clear
+        var appliedInk: NSColor = .clear
         
         init(session: RichTextEditingSession) {
             self.session = session
@@ -1443,9 +2066,61 @@ struct RichTextEditor: NSViewRepresentable {
     }
 }
 
+private final class JournalScrollView: NSScrollView {
+    override var wantsLayer: Bool {
+        get { false }
+        set { }
+    }
+}
+
+private final class JournalClipView: NSClipView {
+    override var wantsLayer: Bool {
+        get { false }
+        set { }
+    }
+}
+
 private final class JournalRichTextView: NSTextView {
     weak var session: RichTextEditingSession?
+    var pageBackground: NSColor = JournalPageColors.warm
+    var pageInk: NSColor = JournalPageColors.lightInk
     private var appliedInset: CGFloat = -1
+    private var viewportObservers: [NSObjectProtocol] = []
+    
+    /// SwiftUI turns layers on after updates. A layer-backed text view stops flashing the caret.
+    override var wantsLayer: Bool {
+        get { false }
+        set { }
+    }
+    
+    override var wantsUpdateLayer: Bool { false }
+    
+    deinit {
+        removeViewportObservers()
+    }
+    
+    /// Underlines misspellings and offers suggestions from the system dictionary.
+    func startSpellChecking() {
+        isGrammarCheckingEnabled = true
+        isContinuousSpellCheckingEnabled = true
+        isAutomaticSpellingCorrectionEnabled = false
+        enabledTextCheckingTypes = NSTextCheckingResult.CheckingType.spelling.rawValue
+            | NSTextCheckingResult.CheckingType.grammar.rawValue
+        guard let storage = textStorage, storage.length > 0, window != nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.checkTextInDocument(nil)
+        }
+    }
+    
+    func applyPageColors() {
+        drawsBackground = true
+        backgroundColor = pageBackground
+        insertionPointColor = pageInk
+        enclosingScrollView?.drawsBackground = true
+        enclosingScrollView?.backgroundColor = pageBackground
+        enclosingScrollView?.contentView.drawsBackground = true
+        enclosingScrollView?.contentView.backgroundColor = pageBackground
+    }
     
     /// Keep a 680pt writing column centered in the window.
     func centerWritingColumn() {
@@ -1455,23 +2130,56 @@ private final class JournalRichTextView: NSTextView {
         appliedInset = side
         textContainerInset = NSSize(width: side, height: 36)
         textContainer?.widthTracksTextView = true
+        needsDisplay = true
+    }
+    
+    /// Full screen and live resize finish with a stale line layout unless this runs.
+    /// Stay on `textLayoutManager`. Reading `layoutManager` switches the view back to TextKit 1.
+    func relayoutForViewportChange() {
+        centerWritingColumn()
+        if let layoutManager = textLayoutManager {
+            layoutManager.ensureLayout(for: layoutManager.documentRange)
+        }
+        needsDisplay = true
+        if window?.firstResponder === self {
+            updateInsertionPointStateAndRestartTimer(true)
+        }
     }
     
     override func layout() {
         super.layout()
+        if window?.inLiveResize == true { return }
         centerWritingColumn()
+    }
+    
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        relayoutAfterViewportSettles()
+    }
+    
+    /// The final bounds are sometimes one turn behind the notification.
+    private func relayoutAfterViewportSettles() {
+        relayoutForViewportChange()
+        DispatchQueue.main.async { [weak self] in
+            self?.relayoutForViewportChange()
+        }
     }
     
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil else { return }
-        // A layer-backed text view, or one that does not draw its background,
-        // never flashes the insertion point. SwiftUI turns layers on, so turn them back off.
-        wantsLayer = false
-        enclosingScrollView?.wantsLayer = false
-        drawsBackground = true
-        backgroundColor = .textBackgroundColor
-        insertionPointColor = .textColor
+        removeViewportObservers()
+        guard let window else { return }
+        applyPageColors()
+        startSpellChecking()
+        let center = NotificationCenter.default
+        viewportObservers = [
+            center.addObserver(forName: NSWindow.didEnterFullScreenNotification, object: window, queue: .main) { [weak self] _ in
+                self?.relayoutAfterViewportSettles()
+            },
+            center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
+                self?.relayoutAfterViewportSettles()
+            }
+        ]
         DispatchQueue.main.async { [weak self] in
             guard let self, self.window != nil else { return }
             self.window?.makeFirstResponder(self)
@@ -1479,73 +2187,71 @@ private final class JournalRichTextView: NSTextView {
         }
     }
     
+    private func removeViewportObservers() {
+        for token in viewportObservers {
+            NotificationCenter.default.removeObserver(token)
+        }
+        viewportObservers.removeAll()
+    }
+    
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard event.modifierFlags.contains(.command) else {
-            return super.performKeyEquivalent(with: event)
+        if performFormattingShortcut(event) {
+            return true
         }
+        return super.performKeyEquivalent(with: event)
+    }
+    
+    /// Matches physical keys. `charactersIgnoringModifiers` still includes Shift,
+    /// so ⌘⇧8 arrives as "*" and the old character switch never saw a list shortcut.
+    private func performFormattingShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard flags.contains(.command), !flags.contains(.control) else { return false }
         
-        let chars = event.charactersIgnoringModifiers ?? ""
-        let shift = event.modifierFlags.contains(.shift)
-        let option = event.modifierFlags.contains(.option)
-        
-        switch chars.lowercased() {
-        case "b" where !shift && !option:
-            session?.toggleBold()
-            return true
-        case "i" where !shift && !option:
-            session?.toggleItalic()
-            return true
-        case "u" where !shift && !option:
-            session?.toggleUnderline()
-            return true
-        case "x" where shift && !option:
-            session?.toggleStrikethrough()
-            return true
-        case "h" where shift && !option:
-            session?.setHighlight(.yellow)
-            return true
-        case "k" where !shift && !option:
-            session?.insertLink()
-            return true
-        case ";" where !shift && !option:
-            session?.insertDateTimestamp()
-            return true
-        case "0" where option && !shift:
-            session?.setParagraphStyle(.normal)
-            return true
-        case "1" where option && !shift:
-            session?.setParagraphStyle(.heading1)
-            return true
-        case "2" where option && !shift:
-            session?.setParagraphStyle(.heading2)
-            return true
-        case "3" where option && !shift:
-            session?.setParagraphStyle(.heading3)
-            return true
-        case "7" where shift && !option:
-            session?.toggleNumberedList()
-            return true
-        case "8" where shift && !option:
-            session?.toggleBulletList()
-            return true
-        case "." where shift && !option:
-            session?.increaseFontSize()
-            return true
-        case "," where shift && !option:
-            session?.decreaseFontSize()
-            return true
-        case "c" where option && !shift:
-            session?.copyFormat()
-            return true
-        case "v" where option && !shift:
-            session?.pasteFormat()
-            return true
-        case "f" where shift && !option:
-            session?.toggleFocusMode()
-            return true
+        let action: (() -> Void)?
+        switch Int(event.keyCode) {
+        case kVK_ANSI_B where flags == .command:
+            action = { [weak self] in self?.session?.toggleBold() }
+        case kVK_ANSI_I where flags == .command:
+            action = { [weak self] in self?.session?.toggleItalic() }
+        case kVK_ANSI_U where flags == .command:
+            action = { [weak self] in self?.session?.toggleUnderline() }
+        case kVK_ANSI_K where flags == .command:
+            action = { [weak self] in self?.session?.insertLink() }
+        case kVK_ANSI_Semicolon where flags == .command:
+            action = { [weak self] in self?.session?.insertDateTimestamp() }
+        case kVK_ANSI_X where flags == [.command, .shift]:
+            action = { [weak self] in self?.session?.toggleStrikethrough() }
+        case kVK_ANSI_H where flags == [.command, .shift]:
+            action = { [weak self] in self?.session?.setHighlight(.yellow) }
+        case kVK_ANSI_7 where flags == [.command, .shift]:
+            action = { [weak self] in self?.session?.toggleNumberedList() }
+        case kVK_ANSI_8 where flags == [.command, .shift]:
+            action = { [weak self] in self?.session?.toggleBulletList() }
+        case kVK_ANSI_Period where flags == [.command, .shift]:
+            action = { [weak self] in self?.session?.increaseFontSize() }
+        case kVK_ANSI_Comma where flags == [.command, .shift]:
+            action = { [weak self] in self?.session?.decreaseFontSize() }
+        case kVK_ANSI_F where flags == [.command, .shift]:
+            action = { [weak self] in self?.session?.toggleFocusMode() }
+        case kVK_ANSI_0 where flags == [.command, .option]:
+            action = { [weak self] in self?.session?.setParagraphStyle(.normal) }
+        case kVK_ANSI_1 where flags == [.command, .option]:
+            action = { [weak self] in self?.session?.setParagraphStyle(.heading1) }
+        case kVK_ANSI_2 where flags == [.command, .option]:
+            action = { [weak self] in self?.session?.setParagraphStyle(.heading2) }
+        case kVK_ANSI_3 where flags == [.command, .option]:
+            action = { [weak self] in self?.session?.setParagraphStyle(.heading3) }
+        case kVK_ANSI_C where flags == [.command, .option]:
+            action = { [weak self] in self?.session?.copyFormat() }
+        case kVK_ANSI_V where flags == [.command, .option]:
+            action = { [weak self] in self?.session?.pasteFormat() }
         default:
-            return super.performKeyEquivalent(with: event)
+            action = nil
         }
+        guard let action else { return false }
+        // Return before the action so ⌘Z, ⌘W, and the menus still receive every other key.
+        DispatchQueue.main.async(execute: action)
+        return true
     }
     
     override func becomeFirstResponder() -> Bool {

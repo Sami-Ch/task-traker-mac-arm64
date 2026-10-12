@@ -63,6 +63,9 @@
 		A1000065 /* ProjectsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000065; };
 		A1000070 /* JournalLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000070; };
 		A1000071 /* JournalSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000071; };
+		A1000072 /* KeyboardShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000072; };
+		A1000073 /* ShortcutsSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000073; };
+		A1000074 /* JournalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000074; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -124,6 +127,9 @@
 		A2000065 /* ProjectsSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsSettingsPane.swift; sourceTree = "<group>"; };
 		A2000070 /* JournalLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalLock.swift; sourceTree = "<group>"; };
 		A2000071 /* JournalSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalSettingsPane.swift; sourceTree = "<group>"; };
+		A2000072 /* KeyboardShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcuts.swift; sourceTree = "<group>"; };
+		A2000073 /* ShortcutsSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsSettingsPane.swift; sourceTree = "<group>"; };
+		A2000074 /* JournalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalStore.swift; sourceTree = "<group>"; };
 		A3000001 /* DailyGoalsTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyGoalsTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -180,6 +186,7 @@
 				A2000032 /* WeekdaySet.swift */,
 				A2000033 /* DaySnapshot.swift */,
 				A2000034 /* TrackerSettings.swift */,
+				A2000072 /* KeyboardShortcuts.swift */,
 				A2000035 /* CalendarPresentation.swift */,
 				A2000060 /* PeriodReport.swift */,
 			);
@@ -190,6 +197,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000006 /* DataStore.swift */,
+				A2000074 /* JournalStore.swift */,
 			);
 			path = Storage;
 			sourceTree = "<group>";
@@ -247,6 +255,7 @@
 				A2000062 /* ReportsSettingsPane.swift */,
 				A2000065 /* ProjectsSettingsPane.swift */,
 				A2000071 /* JournalSettingsPane.swift */,
+				A2000073 /* ShortcutsSettingsPane.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -407,6 +416,9 @@
 				A1000065 /* ProjectsSettingsPane.swift in Sources */,
 				A1000070 /* JournalLock.swift in Sources */,
 				A1000071 /* JournalSettingsPane.swift in Sources */,
+				A1000072 /* KeyboardShortcuts.swift in Sources */,
+				A1000073 /* ShortcutsSettingsPane.swift in Sources */,
+				A1000074 /* JournalStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

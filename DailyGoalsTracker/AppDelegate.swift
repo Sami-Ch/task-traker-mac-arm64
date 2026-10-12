@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: NSPanel?
     private var eventMonitor: Any?
     private var localEventMonitor: Any?
-    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyRefs: [EventHotKeyRef] = []
     private var journalWindow: NSWindow?
     private var settingsWindow: NSWindow?
     
@@ -58,6 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self,
             selector: #selector(openSettingsFromMenu),
             name: .openSettingsWindow,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reregisterGlobalHotKeys),
+            name: .keyboardShortcutsDidChange,
             object: nil
         )
     }
@@ -143,31 +149,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hidePanel()
     }
     
-    // MARK: - Global Hotkey (Cmd+Shift+G)
+    // MARK: - Global Hotkeys
+    private var didInstallHotKeyHandler = false
+    
     private func setupGlobalHotKey() {
+        if !didInstallHotKeyHandler {
+            var eventType = EventTypeSpec()
+            eventType.eventClass = OSType(kEventClassKeyboard)
+            eventType.eventKind = UInt32(kEventHotKeyPressed)
+            
+            InstallEventHandler(GetApplicationEventTarget(), { (_, event, userData) -> OSStatus in
+                guard let userData = userData else { return OSStatus(eventNotHandledErr) }
+                let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
+                
+                var hotKeyID = EventHotKeyID()
+                GetEventParameter(
+                    event,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &hotKeyID
+                )
+                
+                DispatchQueue.main.async {
+                    switch hotKeyID.id {
+                    case 1:
+                        appDelegate.togglePopover()
+                    case 2:
+                        appDelegate.openJournalFromMenu()
+                    case 3:
+                        appDelegate.insertTasksIntoJournal()
+                    default:
+                        break
+                    }
+                }
+                return noErr
+            }, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), nil)
+            didInstallHotKeyHandler = true
+        }
+        
+        reregisterGlobalHotKeys()
+    }
+    
+    @objc private func reregisterGlobalHotKeys() {
+        for hotKeyRef in hotKeyRefs {
+            UnregisterEventHotKey(hotKeyRef)
+        }
+        hotKeyRefs.removeAll()
+        
+        let shortcuts = dataStore.settings.shortcuts
+        registerHotKey(id: 1, chord: shortcuts.openTasks)
+        registerHotKey(id: 2, chord: shortcuts.openJournal)
+        registerHotKey(id: 3, chord: shortcuts.insertJournalTasks)
+    }
+    
+    private func registerHotKey(id: UInt32, chord: KeyChord) {
         var hotKeyID = EventHotKeyID()
         hotKeyID.signature = OSType(0x44475421) // "DGT!"
-        hotKeyID.id = 1
-        
-        var eventType = EventTypeSpec()
-        eventType.eventClass = OSType(kEventClassKeyboard)
-        eventType.eventKind = UInt32(kEventHotKeyPressed)
-        
-        // Install event handler
-        InstallEventHandler(GetApplicationEventTarget(), { (_, event, userData) -> OSStatus in
-            guard let userData = userData else { return OSStatus(eventNotHandledErr) }
-            let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
-            
-            DispatchQueue.main.async {
-                appDelegate.togglePopover()
-            }
-            return noErr
-        }, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), nil)
-        
-        // Register Cmd+Shift+G
-        let modifiers = UInt32(cmdKey | shiftKey)
-        let keyCode = UInt32(kVK_ANSI_Y)
-        RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
+        hotKeyID.id = id
+        var ref: EventHotKeyRef?
+        RegisterEventHotKey(
+            UInt32(chord.keyCode),
+            chord.carbonModifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &ref
+        )
+        if let ref {
+            hotKeyRefs.append(ref)
+        }
     }
     
     // MARK: - Actions
@@ -242,8 +295,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         
         menu.addItem(NSMenuItem.separator())
         
-        menu.addItem(NSMenuItem(title: "Open Tasks", action: #selector(togglePopover), keyEquivalent: "g"))
-        menu.addItem(NSMenuItem(title: "Open Journal", action: #selector(openJournalFromMenu), keyEquivalent: "j"))
+        menu.addItem(menuItem(title: "Open Tasks", action: #selector(togglePopover), chord: dataStore.settings.shortcuts.openTasks))
+        menu.addItem(menuItem(title: "Open Journal", action: #selector(openJournalFromMenu), chord: dataStore.settings.shortcuts.openJournal))
+        menu.addItem(menuItem(title: "Add Tasks to Journal", action: #selector(insertTasksIntoJournal), chord: dataStore.settings.shortcuts.insertJournalTasks))
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
@@ -253,8 +307,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.menu = nil
     }
     
+    private func menuItem(title: String, action: Selector, chord: KeyChord) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: chord.menuKeyEquivalent)
+        if !chord.menuKeyEquivalent.isEmpty {
+            item.keyEquivalentModifierMask = chord.nsEventModifiers
+        }
+        return item
+    }
+    
     @objc func openJournalFromMenu() {
         showJournalWindow(for: dataStore.logicalDate())
+    }
+    
+    @objc func insertTasksIntoJournal() {
+        if journalWindow?.isVisible == true {
+            NSApp.activate(ignoringOtherApps: true)
+            journalWindow?.makeKeyAndOrderFront(nil)
+            NotificationCenter.default.post(name: .insertJournalTaskTemplate, object: nil)
+        } else {
+            journalState.pendingTaskTemplate = true
+            showJournalWindow(for: dataStore.logicalDate())
+        }
     }
     
     @objc func openSettingsFromMenu() {
@@ -312,6 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let window = NSWindow(contentViewController: hosting)
             window.title = "Journal"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.collectionBehavior.insert(.fullScreenPrimary)
             window.setContentSize(NSSize(width: 560, height: 680))
             window.minSize = NSSize(width: 480, height: 460)
             window.isReleasedWhenClosed = false
@@ -351,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     
     // MARK: - Cleanup
     func applicationWillTerminate(_ notification: Notification) {
-        dataStore.setJournal(journalState.attributedText, for: journalState.selectedDate)
+        journalState.flush?()
         appUsageService.persist()
         freezeTimer?.invalidate()
         if let eventMonitor = eventMonitor {
@@ -360,9 +434,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let localEventMonitor = localEventMonitor {
             NSEvent.removeMonitor(localEventMonitor)
         }
-        if let hotKeyRef = hotKeyRef {
+        for hotKeyRef in hotKeyRefs {
             UnregisterEventHotKey(hotKeyRef)
         }
+        hotKeyRefs.removeAll()
     }
     
     func windowWillClose(_ notification: Notification) {
@@ -373,7 +448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let closing = notification.object as? NSWindow
         
         if closing === journalWindow {
-            dataStore.setJournal(journalState.attributedText, for: journalState.selectedDate)
+            journalState.flush?()
             dataStore.lockJournal()
         }
         

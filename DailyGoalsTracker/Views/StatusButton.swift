@@ -63,6 +63,51 @@ struct StatusIndicator: View {
     }
 }
 
+/// Mini status dot whose fill matches 0–1 progress.
+struct ProgressDot: View {
+    let progress: Double
+    var overLimit: Bool = false
+    var size: CGFloat = 14
+    
+    private var clamped: Double { min(1, max(0, progress)) }
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(overLimit ? Color.red.opacity(0.2) : (clamped <= 0 ? Color.gray.opacity(0.35) : Color.gray.opacity(0.16)))
+            if overLimit {
+                Circle().fill(Color.red)
+            } else if clamped >= 1 {
+                Circle().fill(Color.green)
+            } else if clamped > 0 {
+                ProgressPie(progress: clamped)
+                    .fill(GoalStatus.tint(for: clamped))
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+private struct ProgressPie: Shape {
+    var progress: Double
+    
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        path.move(to: center)
+        path.addArc(
+            center: center,
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(-90 + 360 * progress),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
 /// Mini status dot for calendar/grid views
 struct StatusDot: View {
     let status: GoalStatus

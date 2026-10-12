@@ -90,11 +90,11 @@ struct DayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $showingOneOff) {
             OneOffTaskSheet(date: selectedDate)
-                .frame(width: 360, height: 320)
+                .frame(width: 380, height: 560)
         }
         .sheet(item: $editingOneOff) { goal in
             OneOffTaskSheet(date: selectedDate, existing: goal)
-                .frame(width: 360, height: 320)
+                .frame(width: 380, height: 560)
         }
     }
     
@@ -108,9 +108,16 @@ struct DayView: View {
                 ForEach(dayGoals.tracked) { goal in
                     let entry = dataStore.getEntry(for: goal.id, on: selectedDate)
                     let oneOff = dataStore.isOneOff(goal.id, on: selectedDate)
-                    GoalRow(goal: goal, entry: entry, isOneOff: oneOff, onEdit: oneOff ? { editingOneOff = goal } : nil) {
+                    GoalRow(goal: goal, entry: entry, isOneOff: oneOff, onEdit: oneOff ? { editingOneOff = goal } : nil, onSetPercent: { percent in
+                        dataStore.setPercent(percent, for: goal.id, on: selectedDate)
+                    }, onSetAmount: { amount in
+                        dataStore.setAmount(amount, for: goal.id, on: selectedDate)
+                    }, onAdjustAmount: { delta in
+                        dataStore.adjustAmount(for: goal.id, on: selectedDate, by: delta)
+                    }) {
                         dataStore.cycleStatus(for: goal.id, on: selectedDate)
                     }
+                    .id("\(goal.id.uuidString)-\(GoalEntry.dateString(from: selectedDate))")
                     .contextMenu {
                         if oneOff {
                             Button("Edit…") {
@@ -160,7 +167,7 @@ struct DayView: View {
                 }
                 .menuStyle(.borderlessButton)
                 
-                SkippedGoalsSection(goals: dayGoals.skipped)
+                SkippedGoalsSection(goals: dayGoals.skipped, date: selectedDate)
             }
             .padding(.top, 4)
             .padding(.bottom, 6)
@@ -191,6 +198,17 @@ private struct OneOffTaskSheet: View {
     
     @State private var title = ""
     @State private var icon = "star.fill"
+    @State private var kind: GoalKind = .checklist
+    @State private var targetCount = 1
+    @State private var unit = ""
+    @State private var step = 1
+    @State private var hourBound: HourBound = .atLeast
+    @State private var targetMinutes = 60
+    @State private var floorMinutes = 30
+    @State private var previewStatus: GoalStatus = .notDone
+    @State private var previewPercent = 0
+    @State private var previewAmount = 0
+    @State private var previewGoalId = UUID()
     
     private let icons = [
         "star.fill", "bolt.fill", "flag.fill", "checkmark.circle.fill",
@@ -219,58 +237,170 @@ private struct OneOffTaskSheet: View {
             
             Divider()
             
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Only this day — not added to the library.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                
-                TextField("What do you need to do?", text: $title)
-                    .textFieldStyle(.roundedBorder)
-                
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
-                    ForEach(icons, id: \.self) { name in
-                        Button { icon = name } label: {
-                            let tint = GoalIconPalette.color(for: name)
-                            Image(systemName: name)
-                                .font(.system(size: 14))
-                                .frame(width: 32, height: 32)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(icon == name ? tint.opacity(0.25) : Color.gray.opacity(0.1))
-                                )
-                                .foregroundStyle(icon == name ? tint : .secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Only this day — not added to the library.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    TextField("What do you need to do?", text: $title)
+                        .textFieldStyle(.roundedBorder)
+                    
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
+                        ForEach(icons, id: \.self) { name in
+                            Button { icon = name } label: {
+                                let tint = GoalIconPalette.color(for: name)
+                                Image(systemName: name)
+                                    .font(.system(size: 14))
+                                    .frame(width: 32, height: 32)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(icon == name ? tint.opacity(0.25) : Color.gray.opacity(0.1))
+                                    )
+                                    .foregroundStyle(icon == name ? tint : .secondary)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                    }
+                    
+                    TaskTrackingFields(
+                        kind: $kind,
+                        targetCount: $targetCount,
+                        unit: $unit,
+                        step: $step,
+                        hourBound: $hourBound,
+                        targetMinutes: $targetMinutes,
+                        floorMinutes: $floorMinutes
+                    )
+                    
+                    GoalRow(
+                        goal: previewGoal,
+                        entry: previewEntry,
+                        onSetPercent: { value in
+                            previewPercent = min(100, max(0, value))
+                        },
+                        onSetAmount: { value in
+                            previewAmount = min(max(1, targetCount), max(0, value))
+                        },
+                        onAdjustAmount: { delta in
+                            let next = previewAmount + delta
+                            if kind == .count, delta > 0 {
+                                previewAmount = min(max(1, targetCount), max(0, next))
+                            } else {
+                                previewAmount = max(0, next)
+                            }
+                        },
+                        onStatusChange: { previewStatus = previewStatus.next }
+                    )
+                    .id(kind)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.gray.opacity(0.08))
+                    )
+                    
+                    if isEditing {
+                        Button("Delete", role: .destructive) {
+                            if let existing {
+                                dataStore.deleteOneOffTask(existing.id, on: date)
+                            }
+                            dismiss()
+                        }
                     }
                 }
-                
-                if isEditing {
-                    Button("Delete", role: .destructive) {
-                        if let existing {
-                            dataStore.deleteOneOffTask(existing.id, on: date)
-                        }
-                        dismiss()
-                    }
-                    .padding(.top, 4)
-                }
+                .padding(16)
             }
-            .padding(16)
-            
-            Spacer()
         }
         .onAppear {
             if let existing {
                 title = existing.title
                 icon = existing.icon
+                kind = existing.kind
+                targetCount = existing.safeTarget
+                unit = existing.unit
+                step = existing.kind == .hours ? existing.safeHourStep : (existing.kind == .percent ? existing.safePercentStep : existing.safeCountStep)
+                hourBound = existing.hourBound
+                targetMinutes = existing.safeTargetMinutes
+                floorMinutes = existing.hourBound == .between ? existing.safeFloorMinutes : 30
+                previewGoalId = existing.id
             }
         }
     }
     
+    private var previewGoal: Goal {
+        Goal(
+            id: previewGoalId,
+            title: title.isEmpty ? "Task" : title,
+            icon: icon,
+            kind: kind,
+            targetCount: targetCount,
+            unit: unit,
+            step: step,
+            hourBound: hourBound,
+            targetMinutes: targetMinutes,
+            floorMinutes: floorMinutes
+        )
+    }
+    
+    private var previewEntry: GoalEntry {
+        switch kind {
+        case .checklist:
+            return GoalEntry(goalId: previewGoalId, date: date, status: previewStatus)
+        case .percent:
+            return GoalEntry(
+                goalId: previewGoalId,
+                date: date,
+                status: GoalStatus.from(progress: Double(previewPercent) / 100),
+                percent: previewPercent
+            )
+        case .count:
+            let progress = min(1, Double(previewAmount) / Double(max(1, targetCount)))
+            return GoalEntry(
+                goalId: previewGoalId,
+                date: date,
+                status: GoalStatus.from(progress: progress),
+                amount: previewAmount
+            )
+        case .hours:
+            let progress = previewGoal.loggedProgress(previewAmount)
+            return GoalEntry(
+                goalId: previewGoalId,
+                date: date,
+                status: GoalStatus.from(progress: progress),
+                amount: previewAmount
+            )
+        }
+    }
+    
     private func save() {
+        let savedStep = Goal.storedStep(kind: kind, step: step, targetCount: targetCount)
+        let savedFloor = hourBound == .between ? floorMinutes : 0
         if let existing {
-            dataStore.updateOneOffTask(existing.id, title: title, icon: icon, on: date)
+            dataStore.updateOneOffTask(
+                existing.id,
+                title: title,
+                icon: icon,
+                kind: kind,
+                targetCount: targetCount,
+                unit: unit,
+                step: savedStep,
+                hourBound: hourBound,
+                targetMinutes: targetMinutes,
+                floorMinutes: savedFloor,
+                on: date
+            )
         } else {
-            dataStore.addOneOffTask(title: title, icon: icon, on: date)
+            dataStore.addOneOffTask(
+                title: title,
+                icon: icon,
+                kind: kind,
+                targetCount: targetCount,
+                unit: unit,
+                step: savedStep,
+                hourBound: hourBound,
+                targetMinutes: targetMinutes,
+                floorMinutes: savedFloor,
+                on: date
+            )
         }
         dismiss()
     }

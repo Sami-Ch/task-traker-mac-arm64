@@ -88,9 +88,13 @@ final class JournalLock {
         self.scope = scope
     }
     
-    func dayShouldSeal(_ entry: JournalEntry) -> Bool {
+    func shouldSeal(markedSecure: Bool) -> Bool {
         guard hasPassword else { return false }
-        return scope == .all || entry.markedSecure
+        return scope == .all || markedSecure
+    }
+    
+    func dayShouldSeal(_ entry: JournalEntry) -> Bool {
+        shouldSeal(markedSecure: entry.markedSecure)
     }
     
     func setPassword(_ password: String, confirmation: String) throws {

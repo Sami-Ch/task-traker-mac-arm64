@@ -50,4 +50,19 @@ enum GoalStatus: String, Codable, CaseIterable {
         case .done: return "Completed"
         }
     }
+    
+    /// Coarse status for a 0–1 progress value.
+    static func from(progress: Double) -> GoalStatus {
+        if progress <= 0 { return .notDone }
+        if progress >= 1 { return .done }
+        return .partial
+    }
+    
+    /// Gray at zero, orange while in progress, green when complete.
+    static func tint(for progress: Double) -> Color {
+        if progress <= 0 { return .gray.opacity(0.45) }
+        if progress >= 1 { return .green }
+        if progress < 0.5 { return .orange }
+        return .green.opacity(0.85)
+    }
 }

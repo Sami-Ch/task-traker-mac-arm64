@@ -4,6 +4,7 @@ import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
     case general = "General"
+    case shortcuts = "Shortcuts"
     case goals = "Tasks"
     case projects = "Projects"
     case schedule = "Schedule"
@@ -18,6 +19,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
+        case .shortcuts: return "keyboard"
         case .goals: return "checklist"
         case .projects: return "flag.fill"
         case .schedule: return "calendar.badge.clock"
@@ -87,6 +89,7 @@ struct SettingsWindowView: View {
             List(selection: $router.selectedPane) {
                 Section {
                     settingsLink(.general)
+                    settingsLink(.shortcuts)
                 }
                 
                 Section("Tracking") {
@@ -127,6 +130,8 @@ struct SettingsWindowView: View {
         switch selectedPane {
         case .general:
             GeneralSettingsPane()
+        case .shortcuts:
+            ShortcutsSettingsPane()
         case .goals:
             GoalsSettingsPane()
         case .projects:
