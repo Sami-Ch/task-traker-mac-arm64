@@ -63,7 +63,21 @@ struct JournalDocument: Codable {
 
 private struct JournalSealedBody: Codable {
     var text: String
+    var title: String
     var rtfData: Data?
+    
+    init(text: String, title: String, rtfData: Data?) {
+        self.text = text
+        self.title = title
+        self.rtfData = rtfData
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        rtfData = try container.decodeIfPresent(Data.self, forKey: .rtfData)
+    }
 }
 
 /// One password wraps a random key. That key encrypts each secured day.
@@ -170,8 +184,12 @@ final class JournalLock {
         guard let keyData = copyKeychainKey(context: context) ?? copyKeychainKey(context: nil) else {
             throw JournalLockError.needsJournalPassword
         }
-        contentKey = SymmetricKey(data: keyData)
-        isUnlocked = true
+        let key = SymmetricKey(data: keyData)
+        // The prompt resumes off the main thread. Publishing unlock there races the open journal window.
+        await MainActor.run {
+            self.contentKey = key
+            self.isUnlocked = true
+        }
     }
     
     func setTouchIDEnabled(_ enabled: Bool) async throws {
@@ -194,7 +212,10 @@ final class JournalLock {
             clearKeychain()
         }
         record.touchIDEnabled = enabled
-        self.record = record
+        let updated = record
+        await MainActor.run {
+            self.record = updated
+        }
     }
     
     /// Ciphertext for disk. Plain days pass through. Sealed days stay sealed when the key is not in memory.
@@ -220,13 +241,14 @@ final class JournalLock {
         }
         var opened = entry
         opened.text = body.text
+        opened.title = body.title
         opened.rtfData = body.rtfData
         opened.sealedPayload = nil
         return opened
     }
     
     private func seal(_ entry: JournalEntry, using key: SymmetricKey) -> JournalEntry {
-        let body = JournalSealedBody(text: entry.text, rtfData: entry.rtfData)
+        let body = JournalSealedBody(text: entry.text, title: entry.title, rtfData: entry.rtfData)
         guard let data = try? JSONEncoder().encode(body),
               let sealed = try? AES.GCM.seal(data, using: key),
               let combined = sealed.combined else {
@@ -234,6 +256,7 @@ final class JournalLock {
         }
         var sealedEntry = entry
         sealedEntry.text = ""
+        sealedEntry.title = ""
         sealedEntry.rtfData = nil
         sealedEntry.sealedPayload = combined
         if scope == .selected {

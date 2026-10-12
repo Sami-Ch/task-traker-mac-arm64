@@ -137,7 +137,9 @@ final class DataStore {
         guard journalLock.hasPassword, journalLock.isUnlocked else { return }
         journalInactivityTimer?.invalidate()
         try? journalPages.sealForLock()
+        journalPages.persistSealedTitles()
         journalLock.endSession()
+        journalPages.clearSealedTitles()
         publishJournalCatalog()
     }
     
@@ -921,9 +923,9 @@ final class DataStore {
             guard let text = journalPages.plainTextForDisplay(on: date) else {
                 return sealedStub(row)
             }
-            return JournalEntry(date: row.date, text: text, markedSecure: row.markedSecure, updatedAt: row.updatedAt)
+            return JournalEntry(date: row.date, text: text, title: journalPages.visibleTitle(on: date), markedSecure: row.markedSecure, updatedAt: row.updatedAt)
         }
-        return JournalEntry(date: row.date, text: row.preview, markedSecure: row.markedSecure, updatedAt: row.updatedAt)
+        return JournalEntry(date: row.date, text: row.preview, title: row.title, markedSecure: row.markedSecure, updatedAt: row.updatedAt)
     }
     
     /// A writing prompt for each task tracked on this day, appended into the journal.
@@ -982,7 +984,37 @@ final class DataStore {
         return JournalRichText.defaultAttributedString()
     }
     
-    /// Writes only this day. Returns an error message when the file could not be saved.
+    func setJournalTitle(_ title: String, for date: Date) throws {
+        try journalPages.setTitle(title, date: date)
+        publishJournalCatalog()
+    }
+    
+    func journalTitle(for date: Date) -> String {
+        _ = journalEpoch
+        return journalPages.visibleTitle(on: date)
+    }
+    
+    /// Days for the journal sidebar, newest first.
+    /// Today and the open day are included even before they have a page, so the selection always has a row.
+    func journalDayList(including open: Date? = nil) -> [JournalDayListItem] {
+        _ = journalEpoch
+        var items = journalCatalog.values.map { row in
+            JournalDayListItem(
+                date: row.date,
+                title: journalPages.visibleTitle(on: row.date),
+                preview: row.sealed ? "" : row.preview,
+                sealed: row.sealed,
+                wordCount: row.sealed ? 0 : row.wordCount
+            )
+        }
+        let extras = [logicalDate(), open].compactMap { $0 }.map { GoalEntry.startOfCivilDay(for: $0) }
+        for day in extras {
+            let key = GoalEntry.dateString(from: day)
+            guard !items.contains(where: { $0.id == key }) else { continue }
+            items.append(JournalDayListItem(date: day, title: "", preview: "", sealed: false, wordCount: 0))
+        }
+        return items.sorted { $0.date > $1.date }
+    }
     @discardableResult
     func setJournal(_ attributedString: NSAttributedString, for date: Date) -> String? {
         do {
@@ -1014,24 +1046,30 @@ final class DataStore {
     
     func unlockJournal(password: String) throws {
         try journalLock.unlock(password: password)
+        journalPages.rememberSealedTitles()
         publishJournalCatalog()
         scheduleJournalAutoLock()
     }
     
     func unlockJournalWithTouchID(fresh: Bool = false) async throws {
         try await journalLock.unlockWithTouchID(fresh: fresh)
-        if !journalPages.canOpenASealedPage() {
-            journalLock.endSession()
-            publishJournalCatalog()
-            throw JournalLockError.needsJournalPassword
+        try await MainActor.run {
+            if !self.journalPages.canOpenASealedPage() {
+                self.journalLock.endSession()
+                self.publishJournalCatalog()
+                throw JournalLockError.needsJournalPassword
+            }
+            self.journalPages.rememberSealedTitles()
+            self.publishJournalCatalog()
+            self.scheduleJournalAutoLock()
         }
-        publishJournalCatalog()
-        scheduleJournalAutoLock()
     }
     
     func setJournalTouchID(_ enabled: Bool) async throws {
         try await journalLock.setTouchIDEnabled(enabled)
-        try journalPages.saveVault()
+        try await MainActor.run {
+            try self.journalPages.saveVault()
+        }
     }
     
     func setJournalScope(_ scope: JournalLockScope) throws {

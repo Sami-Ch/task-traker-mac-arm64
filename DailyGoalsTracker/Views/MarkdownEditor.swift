@@ -150,9 +150,8 @@ enum JournalPageColors {
     }
     
     static func ink(for paper: NSColor, choice: JournalPaper, scheme: ColorScheme) -> NSColor {
-        if choice == .automatic {
-            return scheme == .dark ? darkInk : lightInk
-        }
+        _ = choice
+        _ = scheme
         return isLight(paper) ? lightInk : darkInk
     }
     
@@ -231,6 +230,51 @@ enum LineSpacing: Double, CaseIterable, Identifiable {
         case .onePointFive: return "1.5"
         case .double: return "2.0"
         }
+    }
+    
+    /// Extra points under each line. TextKit 2 ignores `lineHeightMultiple`, so the gap is stored in points.
+    func extraPoints(forFontSize fontSize: CGFloat) -> CGFloat {
+        let size = max(fontSize, 1)
+        switch self {
+        case .single: return 4
+        case .onePointFifteen: return max(8, size * 0.35)
+        case .onePointFive: return max(14, size * 0.7)
+        case .double: return max(22, size * 1.1)
+        }
+    }
+    
+    static func matching(extraPoints: CGFloat, fontSize: CGFloat) -> LineSpacing {
+        let ratio = extraPoints / max(fontSize, 1)
+        if ratio >= 1.1 { return .double }
+        if ratio >= 0.7 { return .onePointFive }
+        if ratio >= 0.4 { return .onePointFifteen }
+        return .single
+    }
+}
+
+/// Space between characters. Stored as the `kern` attribute.
+enum LetterSpacing: CGFloat, CaseIterable, Identifiable {
+    case tight = -0.6
+    case normal = 0
+    case loose = 1.4
+    case wide = 2.8
+    
+    var id: CGFloat { rawValue }
+    
+    var label: String {
+        switch self {
+        case .tight: return "Tight"
+        case .normal: return "Normal"
+        case .loose: return "Loose"
+        case .wide: return "Wide"
+        }
+    }
+    
+    static func matching(_ kern: CGFloat) -> LetterSpacing {
+        if kern <= -0.3 { return .tight }
+        if kern >= 2.2 { return .wide }
+        if kern >= 0.6 { return .loose }
+        return .normal
     }
 }
 
@@ -822,6 +866,7 @@ final class RichTextEditingSession {
     var currentFontSize: CGFloat = 16
     var currentParagraphStyle: JournalParagraphStyle = .normal
     var currentLineSpacing: LineSpacing = .single
+    var currentLetterSpacing: LetterSpacing = .normal
     var hasFirstLineIndent = false
     var isBulletList = false
     var isNumberedList = false
@@ -844,6 +889,8 @@ final class RichTextEditingSession {
     var nextDayChord: KeyChord = .journalNextDayDefault
     /// The day currently shown in the text view.
     var boundDate: Date?
+    /// While a sidebar title is being edited, opening a day must not take the keyboard.
+    var suspendEditorFocus = false
     private var persistTimer: Timer?
     
     // Format painter
@@ -924,7 +971,7 @@ final class RichTextEditingSession {
         
         storage.setAttributedString(content)
         if let view = textView as? JournalRichTextView {
-            repairUnreadableInk(in: storage, paper: view.pageBackground, ink: pageInk)
+            recolorDefaultInk(in: storage, ink: pageInk)
         }
         var typing = JournalRichText.defaultAttributes()
         typing[.foregroundColor] = pageInk
@@ -933,8 +980,10 @@ final class RichTextEditingSession {
         textView.setSelectedRange(NSRange(location: min(end, storage.length), length: 0))
         updateSelectionState()
         textView.needsDisplay = true
-        textView.window?.makeFirstResponder(textView)
-        textView.updateInsertionPointStateAndRestartTimer(true)
+        if !suspendEditorFocus {
+            textView.window?.makeFirstResponder(textView)
+            textView.updateInsertionPointStateAndRestartTimer(true)
+        }
         (textView as? JournalRichTextView)?.startSpellChecking()
     }
     
@@ -1028,14 +1077,13 @@ final class RichTextEditingSession {
             if paragraphStyle.headIndent > 0 && lists.isEmpty && currentParagraphStyle == .normal {
                 currentParagraphStyle = .quote
             }
-            let baseSize = max(currentFontSize, 1)
-            let spacing = paragraphStyle.lineSpacing
-            let ratio = spacing / baseSize
-            if ratio >= 0.8 { currentLineSpacing = .double }
-            else if ratio >= 0.4 { currentLineSpacing = .onePointFive }
-            else if ratio >= 0.1 { currentLineSpacing = .onePointFifteen }
-            else { currentLineSpacing = .single }
+            currentLineSpacing = LineSpacing.matching(
+                extraPoints: paragraphStyle.lineSpacing,
+                fontSize: currentFontSize
+            )
         }
+        let kern = (attrs[.kern] as? NSNumber)?.doubleValue ?? (attrs[.kern] as? CGFloat).map(Double.init) ?? 0
+        currentLetterSpacing = LetterSpacing.matching(CGFloat(kern))
     }
     
     // MARK: - Formatting Actions
@@ -1159,7 +1207,7 @@ final class RichTextEditingSession {
         }
         
         if let storage = textView.textStorage {
-            repairUnreadableInk(in: storage, paper: paper, ink: ink)
+            recolorDefaultInk(in: storage, ink: ink)
         }
         
         var typing = textView.typingAttributes
@@ -1174,23 +1222,16 @@ final class RichTextEditingSession {
         updateSelectionState()
     }
     
-    /// Only gray letters that cannot be seen on this page. A previous pass stored white text on a white page.
-    private func repairUnreadableInk(in storage: NSTextStorage, paper: NSColor, ink: NSColor) {
+    /// Default body text follows the page. Red, blue, and other chosen colors stay put.
+    private func recolorDefaultInk(in storage: NSTextStorage, ink: NSColor) {
         guard storage.length > 0 else { return }
-        let paperIsLight = JournalPageColors.isLight(paper)
         isAdjustingPageColors = true
         textView?.undoManager?.disableUndoRegistration()
         storage.beginEditing()
         storage.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: storage.length)) { value, subRange, _ in
-            guard let color = value as? NSColor, let rgb = color.usingColorSpace(.sRGB) else { return }
-            let red = rgb.redComponent
-            let green = rgb.greenComponent
-            let blue = rgb.blueComponent
-            let saturation = max(red, green, blue) - min(red, green, blue)
-            guard saturation < 0.12 else { return }
-            let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-            let hidden = paperIsLight ? luminance > 0.82 : luminance < 0.18
-            guard hidden, !color.isClose(to: ink, tolerance: 0.02) else { return }
+            guard let color = value as? NSColor else { return }
+            guard JournalPageColors.isAutomaticBody(color, ink: ink) else { return }
+            if color.isClose(to: ink, tolerance: 0.02) { return }
             storage.addAttribute(.foregroundColor, value: ink, range: subRange)
         }
         storage.endEditing()
@@ -1403,19 +1444,111 @@ final class RichTextEditingSession {
     func setLineSpacing(_ spacing: LineSpacing) {
         guard let textView, let textStorage = textView.textStorage else { return }
         let ns = textStorage.string as NSString
-        var range = textView.selectedRange()
-        range = ns.paragraphRange(for: range)
-        guard range.length > 0 else { return }
+        if ns.length == 0 {
+            applyLineSpacing(spacing, to: &textView.typingAttributes)
+            currentLineSpacing = spacing
+            return
+        }
+        let range = paragraphRange(for: textView.selectedRange(), in: ns)
+        guard range.length > 0 else {
+            applyLineSpacing(spacing, to: &textView.typingAttributes)
+            currentLineSpacing = spacing
+            return
+        }
         
         textView.undoManager?.beginUndoGrouping()
-        textStorage.enumerateAttributes(in: range, options: []) { attrs, subRange, _ in
-            let font = attrs[.font] as? NSFont ?? NSFont.systemFont(ofSize: 16)
-            let newStyle = (attrs[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
-            newStyle.lineSpacing = font.pointSize * CGFloat(spacing.rawValue - 1)
+        textStorage.beginEditing()
+        textStorage.enumerateAttribute(.paragraphStyle, in: range, options: []) { value, subRange, _ in
+            let newStyle = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
+            let font = textStorage.attribute(.font, at: subRange.location, effectiveRange: nil) as? NSFont
+            newStyle.lineHeightMultiple = 1
+            newStyle.lineSpacing = spacing.extraPoints(forFontSize: font?.pointSize ?? currentFontSize)
             textStorage.addAttribute(.paragraphStyle, value: newStyle, range: subRange)
         }
+        textStorage.endEditing()
+        relayoutText()
         textView.undoManager?.endUndoGrouping()
+        var typing = textView.typingAttributes
+        applyLineSpacing(spacing, to: &typing)
+        textView.typingAttributes = typing
         currentLineSpacing = spacing
+    }
+    
+    func setLetterSpacing(_ spacing: LetterSpacing) {
+        guard let textView, let textStorage = textView.textStorage else { return }
+        let ns = textStorage.string as NSString
+        if ns.length == 0 {
+            applyLetterSpacing(spacing, to: &textView.typingAttributes)
+            currentLetterSpacing = spacing
+            return
+        }
+        var range = textView.selectedRange()
+        if range.length == 0 {
+            range = paragraphRange(for: range, in: ns)
+        }
+        range = NSIntersectionRange(range, NSRange(location: 0, length: ns.length))
+        guard range.length > 0 else {
+            applyLetterSpacing(spacing, to: &textView.typingAttributes)
+            currentLetterSpacing = spacing
+            return
+        }
+        
+        textView.undoManager?.beginUndoGrouping()
+        textStorage.beginEditing()
+        if spacing == .normal {
+            textStorage.removeAttribute(.kern, range: range)
+        } else {
+            textStorage.addAttribute(.kern, value: NSNumber(value: Double(spacing.rawValue)), range: range)
+        }
+        textStorage.endEditing()
+        relayoutText()
+        textView.undoManager?.endUndoGrouping()
+        var typing = textView.typingAttributes
+        applyLetterSpacing(spacing, to: &typing)
+        textView.typingAttributes = typing
+        currentLetterSpacing = spacing
+    }
+    
+    private func paragraphRange(for range: NSRange, in text: NSString) -> NSRange {
+        guard text.length > 0 else { return NSRange(location: 0, length: 0) }
+        if range.length > 0 {
+            let start = min(range.location, text.length - 1)
+            let end = min(NSMaxRange(range), text.length)
+            return text.paragraphRange(for: NSRange(location: start, length: max(0, end - start)))
+        }
+        let location = min(max(0, range.location), text.length)
+        if location >= text.length {
+            return text.paragraphRange(for: NSRange(location: text.length - 1, length: 0))
+        }
+        return text.paragraphRange(for: NSRange(location: location, length: 0))
+    }
+    
+    /// TextKit 2 does not pick up paragraph and kern edits until layout is invalidated.
+    private func relayoutText() {
+        guard let textView else { return }
+        textView.didChangeText()
+        if let manager = textView.textLayoutManager {
+            manager.invalidateLayout(for: manager.documentRange)
+            manager.ensureLayout(for: manager.documentRange)
+        }
+        textView.needsDisplay = true
+    }
+    
+    private func applyLineSpacing(_ spacing: LineSpacing, to attributes: inout [NSAttributedString.Key: Any]) {
+        let style = ((attributes[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle)
+            ?? JournalParagraphStyle.normal.paragraphStyle()
+        let fontSize = (attributes[.font] as? NSFont)?.pointSize ?? currentFontSize
+        style.lineHeightMultiple = 1
+        style.lineSpacing = spacing.extraPoints(forFontSize: fontSize)
+        attributes[.paragraphStyle] = style
+    }
+    
+    private func applyLetterSpacing(_ spacing: LetterSpacing, to attributes: inout [NSAttributedString.Key: Any]) {
+        if spacing == .normal {
+            attributes.removeValue(forKey: .kern)
+        } else {
+            attributes[.kern] = NSNumber(value: Double(spacing.rawValue))
+        }
     }
     
     func toggleFirstLineIndent() {
@@ -1735,10 +1868,7 @@ struct RichTextToolbar: View {
                     .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
-                .onHover { hovering in
-                    hoverTip = hovering ? "Paragraph style" : (hoverTip == "Paragraph style" ? nil : hoverTip)
-                }
-                .help("Paragraph style")
+                .toolbarTip("Paragraph style", active: $hoverTip)
                 
                 // Font size picker
                 Menu {
@@ -1763,10 +1893,7 @@ struct RichTextToolbar: View {
                     .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
-                .onHover { hovering in
-                    hoverTip = hovering ? "Font size" : (hoverTip == "Font size" ? nil : hoverTip)
-                }
-                .help("Font size")
+                .toolbarTip("Font size", active: $hoverTip)
                 
                 Divider().frame(height: 20)
                 
@@ -1811,10 +1938,7 @@ struct RichTextToolbar: View {
                     .frame(width: 28, height: 26)
                 }
                 .buttonStyle(.plain)
-                .onHover { hovering in
-                    hoverTip = hovering ? "Text Color" : (hoverTip == "Text Color" ? nil : hoverTip)
-                }
-                .help("Text Color")
+                .toolbarTip("Text Color", active: $hoverTip)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
                 .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
@@ -1842,10 +1966,7 @@ struct RichTextToolbar: View {
                         .frame(width: 28, height: 26)
                 }
                 .buttonStyle(.plain)
-                .onHover { hovering in
-                    hoverTip = hovering ? "Highlight (⌘⇧H)" : (hoverTip == "Highlight (⌘⇧H)" ? nil : hoverTip)
-                }
-                .help("Highlight (⌘⇧H)")
+                .toolbarTip("Highlight (⌘⇧H)", active: $hoverTip)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
                 .background(session.currentHighlight == .none ? chipFill : session.currentHighlight.swiftUIColor.opacity(0.2), in: RoundedRectangle(cornerRadius: 6))
@@ -1873,11 +1994,17 @@ struct RichTextToolbar: View {
                 .padding(.vertical, 3)
                 .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 
-                // Line spacing
+                // Line spacing. `text.linesspacing` is not a symbol, so the button drew blank.
                 Menu {
                     ForEach(LineSpacing.allCases) { spacing in
-                        Button(spacing.label) {
+                        Button {
                             session.setLineSpacing(spacing)
+                        } label: {
+                            if session.currentLineSpacing == spacing {
+                                Label(spacing.label, systemImage: "checkmark")
+                            } else {
+                                Text(spacing.label)
+                            }
                         }
                     }
                     Divider()
@@ -1892,15 +2019,39 @@ struct RichTextToolbar: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "text.linesspacing")
+                    Image(systemName: "arrow.up.and.down.text.horizontal")
                         .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.primary)
                         .frame(width: 28, height: 26)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .onHover { hovering in
-                    hoverTip = hovering ? "Line spacing" : (hoverTip == "Line spacing" ? nil : hoverTip)
+                .toolbarTip("Line spacing", active: $hoverTip)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 3)
+                .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
+                
+                Menu {
+                    ForEach(LetterSpacing.allCases) { spacing in
+                        Button {
+                            session.setLetterSpacing(spacing)
+                        } label: {
+                            if session.currentLetterSpacing == spacing {
+                                Label(spacing.label, systemImage: "checkmark")
+                            } else {
+                                Text(spacing.label)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.left.and.right.text.vertical")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .frame(width: 28, height: 26)
+                        .contentShape(Rectangle())
                 }
-                .help("Line spacing")
+                .buttonStyle(.plain)
+                .toolbarTip("Letter spacing", active: $hoverTip)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
                 .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
@@ -1927,10 +2078,7 @@ struct RichTextToolbar: View {
                     .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
-                .onHover { hovering in
-                    hoverTip = hovering ? "Insert" : (hoverTip == "Insert" ? nil : hoverTip)
-                }
-                .help("Insert")
+                .toolbarTip("Insert", active: $hoverTip)
                 
                 Divider().frame(height: 20)
                 
@@ -1975,7 +2123,7 @@ struct RichTextToolbar: View {
                         .frame(width: 28, height: 26)
                 }
                 .buttonStyle(.plain)
-                .help("Spelling. Right-click a word to replace it. ⌘D selects the next match.")
+                .toolbarTip("Spelling. Right-click a word to replace it. ⌘D selects the next match.", active: $hoverTip)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
                 .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
@@ -1992,20 +2140,6 @@ struct RichTextToolbar: View {
             .padding(.horizontal, 10)
         }
         .frame(height: 40)
-        .overlay(alignment: .top) {
-            if let hoverTip {
-                Text(hoverTip)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
-                    .offset(y: 42)
-                    .allowsHitTesting(false)
-            }
-        }
-        .zIndex(hoverTip == nil ? 0 : 4)
     }
     
     private func toolButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
@@ -2017,10 +2151,7 @@ struct RichTextToolbar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            hoverTip = hovering ? help : (hoverTip == help ? nil : hoverTip)
-        }
-        .help(help)
+        .toolbarTip(help, active: $hoverTip)
     }
     
     private func formatButton(_ systemName: String, help: String, isActive: Bool, action: @escaping () -> Void) -> some View {
@@ -2033,12 +2164,47 @@ struct RichTextToolbar: View {
         }
         .buttonStyle(.plain)
         .background(isActive ? Color.orange.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
-        .onHover { hovering in
-            hoverTip = hovering ? help : (hoverTip == help ? nil : hoverTip)
-        }
-        .help(help)
+        .toolbarTip(help, active: $hoverTip)
     }
     
+}
+
+/// System `.help` tips do not appear on controls inside the toolbar's horizontal scroll view.
+struct ToolbarTip: Equatable {
+    var text: String
+    var bounds: Anchor<CGRect>
+}
+
+struct ToolbarTipKey: PreferenceKey {
+    static var defaultValue: ToolbarTip? = nil
+    static func reduce(value: inout ToolbarTip?, nextValue: () -> ToolbarTip?) {
+        value = nextValue() ?? value
+    }
+}
+
+private extension View {
+    func toolbarTip(_ help: String, active: Binding<String?>) -> some View {
+        modifier(ToolbarTipModifier(help: help, active: active))
+    }
+}
+
+private struct ToolbarTipModifier: ViewModifier {
+    var help: String
+    @Binding var active: String?
+    
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                if hovering {
+                    active = help
+                } else if active == help {
+                    active = nil
+                }
+            }
+            .anchorPreference(key: ToolbarTipKey.self, value: .bounds) { anchor in
+                active == help ? ToolbarTip(text: help, bounds: anchor) : nil
+            }
+    }
 }
 
 // MARK: - Rich Text Editor (NSTextView wrapper)

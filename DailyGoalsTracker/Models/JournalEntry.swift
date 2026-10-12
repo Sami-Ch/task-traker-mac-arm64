@@ -5,6 +5,8 @@ import Foundation
 struct JournalEntry: Identifiable, Codable, Equatable {
     var id: String { dateString }
     let date: Date
+    /// Optional name for this day. Empty when the page has no title.
+    var title: String
     /// Plain text for previews, search, word count, and report snippets.
     var text: String
     /// RTF blob for the rich text editor. Nil for legacy markdown-only entries.
@@ -51,10 +53,11 @@ struct JournalEntry: Identifiable, Codable, Equatable {
     }
 
     init(
-        date: Date, text: String, rtfData: Data? = nil, markedSecure: Bool = false,
+        date: Date, text: String, title: String = "", rtfData: Data? = nil, markedSecure: Bool = false,
         sealedPayload: Data? = nil, updatedAt: Date = Date()
     ) {
         self.date = GoalEntry.startOfCivilDay(for: date)
+        self.title = title
         self.text = text
         self.rtfData = rtfData
         self.markedSecure = markedSecure
@@ -63,7 +66,7 @@ struct JournalEntry: Identifiable, Codable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case date, text, rtfData, updatedAt, markedSecure, sealedPayload
+        case date, text, title, rtfData, updatedAt, markedSecure, sealedPayload
     }
 
     init(from decoder: Decoder) throws {
@@ -71,6 +74,7 @@ struct JournalEntry: Identifiable, Codable, Equatable {
         let decodedDate = try container.decode(Date.self, forKey: .date)
         date = GoalEntry.startOfCivilDay(for: decodedDate)
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
         rtfData = try container.decodeIfPresent(Data.self, forKey: .rtfData)
         markedSecure = try container.decodeIfPresent(Bool.self, forKey: .markedSecure) ?? false
         sealedPayload = try container.decodeIfPresent(Data.self, forKey: .sealedPayload)
@@ -81,6 +85,7 @@ struct JournalEntry: Identifiable, Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(date, forKey: .date)
         try container.encode(text, forKey: .text)
+        try container.encode(title, forKey: .title)
         try container.encodeIfPresent(rtfData, forKey: .rtfData)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(markedSecure, forKey: .markedSecure)

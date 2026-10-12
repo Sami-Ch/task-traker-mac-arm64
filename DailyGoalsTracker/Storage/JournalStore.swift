@@ -7,7 +7,15 @@ enum JournalSavePhase: Equatable {
     case failed(String)
 }
 
-/// Lightweight row for calendar dots, previews, and lock state. The page body lives in its own file.
+/// One row in the journal sidebar.
+struct JournalDayListItem: Identifiable, Equatable {
+    var date: Date
+    var title: String
+    var preview: String
+    var sealed: Bool
+    var wordCount: Int
+    var id: String { GoalEntry.dateString(from: date) }
+}
 struct JournalCatalogEntry: Codable, Equatable, Identifiable {
     var date: Date
     var updatedAt: Date
@@ -16,11 +24,45 @@ struct JournalCatalogEntry: Codable, Equatable, Identifiable {
     var characterCount: Int
     var markedSecure: Bool
     var sealed: Bool
+    /// Shown even while the day's writing is sealed. The page body stays encrypted.
+    var title: String
 
     var id: String { dateString }
 
     var dateString: String {
         GoalEntry.dateString(from: date)
+    }
+    
+    init(
+        date: Date,
+        updatedAt: Date,
+        preview: String,
+        wordCount: Int,
+        characterCount: Int,
+        markedSecure: Bool,
+        sealed: Bool,
+        title: String = ""
+    ) {
+        self.date = date
+        self.updatedAt = updatedAt
+        self.preview = preview
+        self.wordCount = wordCount
+        self.characterCount = characterCount
+        self.markedSecure = markedSecure
+        self.sealed = sealed
+        self.title = title
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        date = try container.decode(Date.self, forKey: .date)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
+        wordCount = try container.decodeIfPresent(Int.self, forKey: .wordCount) ?? 0
+        characterCount = try container.decodeIfPresent(Int.self, forKey: .characterCount) ?? 0
+        markedSecure = try container.decodeIfPresent(Bool.self, forKey: .markedSecure) ?? false
+        sealed = try container.decodeIfPresent(Bool.self, forKey: .sealed) ?? false
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
     }
 }
 
@@ -41,6 +83,8 @@ final class JournalStore {
     private let legacyURL: URL
     private let journalLock: JournalLock
 
+    /// Titles of sealed days, filled only while the journal is unlocked. Not written to the catalog.
+    private var sealedTitles: [String: String] = [:]
     private(set) var catalog: [String: JournalCatalogEntry] = [:]
     /// Plain text cached while the journal is unlocked. Dropped on lock. Never written for sealed days.
     private var sessionText: [String: String] = [:]
@@ -103,8 +147,13 @@ final class JournalStore {
             throw JournalLockError.locked
         }
         let plain = attributedString.string
+        let keptTitle = catalog[key]?.title ?? ""
         if plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            try removeDay(key)
+            if keptTitle.isEmpty {
+                try removeDay(key)
+            } else {
+                try keepTitleOnlyDay(key: key, date: date, title: keptTitle)
+            }
             return
         }
         let marked = catalog[key]?.markedSecure ?? false
@@ -115,11 +164,117 @@ final class JournalStore {
         let entry = JournalEntry(
             date: date,
             text: plain,
+            title: keptTitle,
             rtfData: rtf,
             markedSecure: marked,
             updatedAt: Date()
         )
         try store(entry)
+    }
+    
+    /// Updates the day's name without rewriting the page file.
+    func setTitle(_ title: String, date: Date) throws {
+        let key = GoalEntry.dateString(from: date)
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if catalog[key]?.sealed == true {
+            if journalLock.isUnlocked,
+               let row = catalog[key],
+               let sealed = readSealedEntry(key: key, row: row),
+               var opened = journalLock.reveal(sealed) {
+                opened.title = trimmed
+                try store(opened)
+            } else {
+                catalog[key]?.title = trimmed
+                catalog[key]?.updatedAt = Date()
+                try writeCatalog()
+            }
+            sealedTitles[key] = trimmed
+            return
+        }
+        if catalog[key] == nil {
+            guard !trimmed.isEmpty else { return }
+            catalog[key] = JournalCatalogEntry(
+                date: GoalEntry.startOfCivilDay(for: date),
+                updatedAt: Date(),
+                preview: "",
+                wordCount: 0,
+                characterCount: 0,
+                markedSecure: false,
+                sealed: false,
+                title: trimmed
+            )
+            try writeCatalog()
+            return
+        }
+        catalog[key]?.title = trimmed
+        catalog[key]?.updatedAt = Date()
+        if trimmed.isEmpty && !fileManager.fileExists(atPath: rtfURL(key).path) {
+            try removeDay(key)
+            return
+        }
+        try writeCatalog()
+    }
+    
+    /// Name shown in the sidebar. The catalog keeps it after the journal locks.
+    func visibleTitle(on date: Date) -> String {
+        let key = GoalEntry.dateString(from: date)
+        if let title = catalog[key]?.title, !title.isEmpty {
+            return title
+        }
+        return sealedTitles[key] ?? ""
+    }
+    
+    func rememberSealedTitles() {
+        sealedTitles = [:]
+        guard journalLock.isUnlocked else { return }
+        var restored = false
+        for key in Array(catalog.keys) {
+            guard let row = catalog[key], row.sealed else { continue }
+            guard let sealed = readSealedEntry(key: key, row: row),
+                  let opened = journalLock.reveal(sealed) else { continue }
+            sealedTitles[key] = opened.title
+            if row.title.isEmpty, !opened.title.isEmpty {
+                catalog[key]?.title = opened.title
+                restored = true
+            }
+        }
+        if restored {
+            try? writeCatalog()
+        }
+    }
+    
+    /// Copies names learned while unlocked into the catalog so locking does not drop them.
+    func persistSealedTitles() {
+        var changed = false
+        for (key, title) in sealedTitles where !title.isEmpty {
+            guard catalog[key]?.title != title else { continue }
+            catalog[key]?.title = title
+            changed = true
+        }
+        if changed {
+            try? writeCatalog()
+        }
+    }
+    
+    func clearSealedTitles() {
+        sealedTitles = [:]
+    }
+    
+    private func keepTitleOnlyDay(key: String, date: Date, title: String) throws {
+        catalog[key] = JournalCatalogEntry(
+            date: GoalEntry.startOfCivilDay(for: date),
+            updatedAt: Date(),
+            preview: "",
+            wordCount: 0,
+            characterCount: 0,
+            markedSecure: catalog[key]?.markedSecure ?? false,
+            sealed: false,
+            title: title
+        )
+        sessionText[key] = ""
+        try writeCatalog()
+        try deleteIfExists(rtfURL(key))
+        try deleteIfExists(sealedURL(key))
     }
 
     func setMarkedSecure(_ secure: Bool, date: Date) throws {
@@ -222,6 +377,7 @@ final class JournalStore {
         let prepared = journalLock.prepareForDisk(entry)
         if prepared.isSealed, let payload = prepared.sealedPayload {
             try atomicWrite(payload, to: sealedURL(key))
+            sealedTitles[key] = entry.title
             catalog[key] = JournalCatalogEntry(
                 date: entry.date,
                 updatedAt: Date(),
@@ -229,7 +385,8 @@ final class JournalStore {
                 wordCount: entry.wordCount,
                 characterCount: entry.characterCount,
                 markedSecure: prepared.markedSecure,
-                sealed: true
+                sealed: true,
+                title: entry.title
             )
             sessionText[key] = entry.text
             try writeCatalog()
@@ -245,9 +402,11 @@ final class JournalStore {
             wordCount: entry.wordCount,
             characterCount: entry.characterCount,
             markedSecure: entry.markedSecure,
-            sealed: false
+            sealed: false,
+            title: entry.title
         )
         sessionText[key] = entry.text
+        sealedTitles.removeValue(forKey: key)
         try writeCatalog()
         try deleteIfExists(sealedURL(key))
     }
@@ -263,7 +422,8 @@ final class JournalStore {
             wordCount: entry.wordCount,
             characterCount: entry.characterCount,
             markedSecure: false,
-            sealed: false
+            sealed: false,
+            title: entry.title
         )
         try writeCatalog()
         try deleteIfExists(sealedURL(key))
@@ -291,6 +451,7 @@ final class JournalStore {
         return JournalEntry(
             date: row.date,
             text: text,
+            title: row.title,
             rtfData: data,
             markedSecure: row.markedSecure,
             updatedAt: row.updatedAt
@@ -390,7 +551,8 @@ final class JournalStore {
                 wordCount: 0,
                 characterCount: 0,
                 markedSecure: entry.markedSecure,
-                sealed: true
+                sealed: true,
+                title: entry.title
             )
             return
         }
@@ -406,7 +568,7 @@ final class JournalStore {
         }
         guard let rtf else { throw JournalFileError.writeFailed }
         try atomicWrite(rtf, to: rtfURL(key))
-        let page = JournalEntry(date: entry.date, text: text, markedSecure: entry.markedSecure, updatedAt: entry.updatedAt)
+        let page = JournalEntry(date: entry.date, text: text, title: entry.title, markedSecure: entry.markedSecure, updatedAt: entry.updatedAt)
         catalog[key] = JournalCatalogEntry(
             date: entry.date,
             updatedAt: entry.updatedAt,
@@ -414,7 +576,8 @@ final class JournalStore {
             wordCount: page.wordCount,
             characterCount: page.characterCount,
             markedSecure: entry.markedSecure,
-            sealed: false
+            sealed: false,
+            title: entry.title
         )
     }
 }

@@ -386,8 +386,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = "Journal"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.collectionBehavior.insert(.fullScreenPrimary)
-            window.setContentSize(NSSize(width: 560, height: 680))
-            window.minSize = NSSize(width: 480, height: 460)
+            window.setContentSize(NSSize(width: 960, height: 680))
+            window.minSize = NSSize(width: 860, height: 520)
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()

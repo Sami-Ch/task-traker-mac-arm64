@@ -115,6 +115,10 @@ struct JournalWindowView: View {
     @State private var pendingSecurityChange: Bool?
     @State private var showPasswordHint = false
     @State private var autoPromptedDay: String?
+    @State private var sidebarQuery = ""
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var renamingDayID: String?
+    @State private var renameDraft = ""
     
     private var isDayLocked: Bool {
         dataStore.journal(for: state.selectedDate)?.isSealed == true
@@ -125,8 +129,71 @@ struct JournalWindowView: View {
     }
     
     var body: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            journalSidebar
+        } detail: {
+            journalPage
+        }
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 860, minHeight: 520)
+        .onAppear {
+            editor.persistHandler = { text, date in
+                dataStore.setJournal(text, for: date)
+            }
+            editor.onCommandArrowDay = { delta in
+                shiftDay(delta)
+            }
+            syncDayShortcutChords()
+            state.flush = { editor.persistNow() }
+            openDay(state.selectedDate, saving: nil)
+            considerAutoPrompt()
+            consumePendingTaskTemplate()
+        }
+        .onDisappear {
+            finishRename(save: true)
+            editor.persistNow()
+            state.flush = nil
+        }
+        .onChange(of: dataStore.settings.shortcuts) { _, _ in
+            syncDayShortcutChords()
+        }
+        .background(JournalDayKeyboardShortcuts(
+            previous: dataStore.settings.shortcuts.journalPreviousDay,
+            next: dataStore.settings.shortcuts.journalNextDay,
+            onPrevious: { shiftDay(-1) },
+            onNext: { shiftDay(1) }
+        ))
+        .onChange(of: state.selectedDate) { oldDate, newDate in
+            if let renaming = renamingDayID, renaming != GoalEntry.dateString(from: newDate) {
+                finishRename(save: true)
+            }
+            openDay(newDate, saving: oldDate)
+            considerAutoPrompt()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .insertJournalTaskTemplate)) { _ in
+            insertTaskTemplate()
+        }
+        .sheet(isPresented: $showPasswordSheet) {
+            passwordSheet
+        }
+        .alert("Journal password", isPresented: $showPasswordHint) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Set a journal password in Settings first.")
+        }
+        .onChange(of: dataStore.journalLock.isUnlocked) { _, unlocked in
+            if unlocked {
+                unlockPassword = ""
+                unlockError = nil
+                consumePendingTaskTemplate()
+            } else {
+                renamingDayID = nil
+            }
+        }
+    }
+    
+    private var journalPage: some View {
         VStack(spacing: 0) {
-            // Header with date navigation
             headerView
             
             Divider()
@@ -153,55 +220,36 @@ struct JournalWindowView: View {
             
             statusBar
         }
-        .frame(minWidth: 600, minHeight: 500)
         .background(windowBackground)
-        .onAppear {
-            editor.persistHandler = { text, date in
-                dataStore.setJournal(text, for: date)
+        .overlayPreferenceValue(ToolbarTipKey.self) { tip in
+            GeometryReader { proxy in
+                if let tip {
+                    let rect = proxy[tip.bounds]
+                    let x = min(max(rect.midX, 90), max(90, proxy.size.width - 90))
+                    let y = max(14, rect.minY - 18)
+                    Text(tip.text)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: 280)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .background {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                                .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
+                        }
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+                        }
+                        .position(x: x, y: y)
+                        .allowsHitTesting(false)
+                }
             }
-            editor.onCommandArrowDay = { delta in
-                shiftDay(delta)
-            }
-            syncDayShortcutChords()
-            state.flush = { editor.persistNow() }
-            openDay(state.selectedDate, saving: nil)
-            considerAutoPrompt()
-            consumePendingTaskTemplate()
-        }
-        .onDisappear {
-            editor.persistNow()
-            state.flush = nil
-        }
-        .onChange(of: dataStore.settings.shortcuts) { _, _ in
-            syncDayShortcutChords()
-        }
-        .background(JournalDayKeyboardShortcuts(
-            previous: dataStore.settings.shortcuts.journalPreviousDay,
-            next: dataStore.settings.shortcuts.journalNextDay,
-            onPrevious: { shiftDay(-1) },
-            onNext: { shiftDay(1) }
-        ))
-        .onChange(of: state.selectedDate) { oldDate, newDate in
-            openDay(newDate, saving: oldDate)
-            considerAutoPrompt()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .insertJournalTaskTemplate)) { _ in
-            insertTaskTemplate()
-        }
-        .sheet(isPresented: $showPasswordSheet) {
-            passwordSheet
-        }
-        .alert("Journal password", isPresented: $showPasswordHint) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Set a journal password in Settings first.")
-        }
-        .onChange(of: dataStore.journalLock.isUnlocked) { _, unlocked in
-            if unlocked {
-                unlockPassword = ""
-                unlockError = nil
-                consumePendingTaskTemplate()
-            }
+            .allowsHitTesting(false)
         }
     }
     
@@ -294,10 +342,283 @@ struct JournalWindowView: View {
         pageIsLight ? Color.black.opacity(0.62) : Color.white.opacity(0.78)
     }
     
+    private func finishRename(save: Bool, text: String? = nil) {
+        guard let id = renamingDayID, let date = GoalEntry.date(from: id) else {
+            renamingDayID = nil
+            editor.suspendEditorFocus = false
+            return
+        }
+        renamingDayID = nil
+        editor.suspendEditorFocus = false
+        guard save else { return }
+        let draft = (text ?? renameDraft).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard draft != dataStore.journalTitle(for: date) else { return }
+        do {
+            try dataStore.setJournalTitle(draft, for: date)
+        } catch {
+            unlockError = error.localizedDescription
+        }
+    }
+    
+    private func beginRename(_ day: JournalDayListItem) {
+        guard renamingDayID != day.id else { return }
+        if renamingDayID != nil {
+            finishRename(save: true)
+        }
+        editor.suspendEditorFocus = true
+        columnVisibility = .all
+        renameDraft = day.title
+        renamingDayID = day.id
+    }
+    
+    // MARK: - Sidebar
+    
+    private var selectedDayID: Binding<String?> {
+        Binding(
+            get: { GoalEntry.dateString(from: state.selectedDate) },
+            set: { newValue in
+                guard let newValue, let date = GoalEntry.date(from: newValue) else { return }
+                guard !Calendar.current.isDate(date, inSameDayAs: state.selectedDate) else { return }
+                state.selectedDate = date
+            }
+        )
+    }
+    
+    private var journalSidebar: some View {
+        let groups = filteredDayGroups
+        return List(selection: selectedDayID) {
+            ForEach(groups) { group in
+                Section(group.title) {
+                    ForEach(group.days) { day in
+                        dayRow(day)
+                            .tag(day.id)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .environment(\.defaultMinListRowHeight, 44)
+        .overlay {
+            if groups.isEmpty, !trimmedQuery.isEmpty {
+                ContentUnavailableView.search(text: trimmedQuery)
+            }
+        }
+        .onKeyPress(.return) {
+            guard renamingDayID == nil, let day = selectedDayItem else { return .ignored }
+            // The key is still in flight. Starting the field now would commit on that same Return.
+            DispatchQueue.main.async { beginRename(day) }
+            return .handled
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SidebarSearchField(text: $sidebarQuery, prompt: "Search titles and entries")
+                .frame(height: 28)
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            sidebarFooter
+        }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
+    }
+    
+    private var sidebarFooter: some View {
+        let written = dataStore.journalDayList().filter { $0.sealed || $0.wordCount > 0 }.count
+        return VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 8) {
+                Text(written == 1 ? "1 entry" : "\(written) entries")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                Button("Today", action: jumpToToday)
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11, weight: .medium))
+                    .disabled(Calendar.current.isDate(state.selectedDate, inSameDayAs: dataStore.logicalDate()))
+                    .help("Go to today")
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+        }
+    }
+    
+    private var selectedDayItem: JournalDayListItem? {
+        let key = GoalEntry.dateString(from: state.selectedDate)
+        return dataStore.journalDayList(including: state.selectedDate).first { $0.id == key }
+    }
+    
+    private func dayRow(_ day: JournalDayListItem) -> some View {
+        let today = dataStore.logicalDate()
+        let isToday = Calendar.current.isDate(day.date, inSameDayAs: today)
+        let content = sidebarRowText(for: day, today: today)
+        let isRenaming = renamingDayID == day.id
+        return dayRowLabel(day, isToday: isToday, content: content)
+            .overlay {
+                if !isRenaming {
+                    SidebarRowClicker(
+                        canRename: true,
+                        canRemoveTitle: !day.title.isEmpty,
+                        onSingle: { state.selectedDate = day.date },
+                        onDouble: { beginRename(day); state.selectedDate = day.date },
+                        onRemoveTitle: { try? dataStore.setJournalTitle("", for: day.date) }
+                    )
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(presentation.dateSubtitle(for: day.date)), \(content.heading)")
+            .accessibilityHint(day.sealed ? "Writing is locked. Double-click or press Return to rename." : "Double-click or press Return to rename")
+            .accessibilityAction(named: "Rename") { beginRename(day) }
+    }
+    
+    private func dayRowLabel(_ day: JournalDayListItem, isToday: Bool, content: SidebarRowText) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(spacing: 0) {
+                Text(presentation.weekdayName(for: day.date, style: .chip).uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(isToday ? Color.accentColor : Color.secondary)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                Text(presentation.dayNumber(for: day.date))
+                    .font(.system(size: 17, weight: isToday ? .bold : .medium, design: .rounded))
+                    .foregroundStyle(isToday ? Color.accentColor : Color.primary)
+                    .monospacedDigit()
+            }
+            .frame(width: 34)
+            
+            VStack(alignment: .leading, spacing: 1) {
+                if renamingDayID == day.id {
+                    SidebarRenameField(
+                        text: renameDraft,
+                        placeholder: "Add a title",
+                        onCommit: { finishRename(save: true, text: $0) },
+                        onCancel: { finishRename(save: false) }
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+                } else {
+                    Text(content.heading)
+                        .font(.system(size: 13, weight: content.headingIsTitle ? .semibold : .regular))
+                        .foregroundStyle(content.headingIsQuiet ? Color.secondary : Color.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                HStack(spacing: 4) {
+                    if day.sealed {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 8, weight: .semibold))
+                    }
+                    Text(content.detail)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+    
+    private struct SidebarRowText {
+        var heading: String
+        var headingIsTitle: Bool
+        var headingIsQuiet: Bool
+        var detail: String
+    }
+    
+    /// A title leads when there is one. Otherwise the first line of writing stands in, the way Notes names a note.
+    private func sidebarRowText(for day: JournalDayListItem, today: Date) -> SidebarRowText {
+        let relative = presentation.relativeTitle(for: day.date, logicalToday: today)
+        if day.sealed {
+            if !day.title.isEmpty {
+                return SidebarRowText(heading: day.title, headingIsTitle: true, headingIsQuiet: false, detail: "Locked")
+            }
+            return SidebarRowText(heading: relative, headingIsTitle: false, headingIsQuiet: false, detail: "Locked")
+        }
+        let preview = day.preview
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+        let words = day.wordCount == 1 ? "1 word" : "\(day.wordCount) words"
+        if !day.title.isEmpty {
+            return SidebarRowText(
+                heading: day.title,
+                headingIsTitle: true,
+                headingIsQuiet: false,
+                detail: preview.isEmpty ? relative : preview
+            )
+        }
+        if !preview.isEmpty {
+            return SidebarRowText(heading: preview, headingIsTitle: false, headingIsQuiet: false, detail: "\(relative) · \(words)")
+        }
+        return SidebarRowText(heading: relative, headingIsTitle: false, headingIsQuiet: true, detail: "No entry yet")
+    }
+    
+    private var trimmedQuery: String {
+        sidebarQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private struct JournalDayGroup: Identifiable {
+        var id: String
+        var title: String
+        var days: [JournalDayListItem]
+    }
+    
+    private var filteredDayGroups: [JournalDayGroup] {
+        let query = trimmedQuery
+        let today = dataStore.logicalDate()
+        let days = dataStore.journalDayList(including: state.selectedDate).filter { day in
+            guard !query.isEmpty else { return true }
+            let fields = [
+                day.title,
+                day.preview,
+                presentation.relativeTitle(for: day.date, logicalToday: today),
+                presentation.dateSubtitle(for: day.date),
+            ]
+            return fields.contains { $0.localizedStandardContains(query) }
+        }
+        let calendar = Calendar.current
+        var order: [String] = []
+        var buckets: [String: (start: Date, days: [JournalDayListItem])] = [:]
+        for day in days {
+            let parts = calendar.dateComponents([.year, .month], from: day.date)
+            let key = "\(parts.year ?? 0)-\(parts.month ?? 0)"
+            let start = calendar.date(from: parts) ?? day.date
+            if buckets[key] == nil {
+                order.append(key)
+                buckets[key] = (start, [])
+            }
+            buckets[key]?.days.append(day)
+        }
+        return order.compactMap { key in
+            guard let bucket = buckets[key] else { return nil }
+            return JournalDayGroup(
+                id: key,
+                title: presentation.monthTitle(for: bucket.start),
+                days: bucket.days
+            )
+        }
+    }
+    
     // MARK: - Header
     
     private var headerView: some View {
         HStack(spacing: 12) {
+            Button {
+                columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+            } label: {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(chromeQuiet)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(chromeChip))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help(columnVisibility == .detailOnly ? "Show days" : "Hide days")
+            
             Button {
                 shiftDay(-1)
             } label: {
@@ -312,11 +633,21 @@ struct JournalWindowView: View {
             .help("Previous day (\(dataStore.settings.shortcuts.journalPreviousDay.displayString))")
             
             VStack(spacing: 2) {
-                Text(presentation.relativeTitle(for: state.selectedDate, logicalToday: dataStore.logicalDate()))
-                    .font(.system(size: 15, weight: .semibold))
-                Text(presentation.dateSubtitle(for: state.selectedDate))
-                    .font(.system(size: 11))
-                    .foregroundStyle(chromeQuiet)
+                let pageTitle = dataStore.journalTitle(for: state.selectedDate)
+                if !pageTitle.isEmpty {
+                    Text(pageTitle)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineLimit(1)
+                    Text(presentation.dateSubtitle(for: state.selectedDate))
+                        .font(.system(size: 11))
+                        .foregroundStyle(chromeQuiet)
+                } else {
+                    Text(presentation.relativeTitle(for: state.selectedDate, logicalToday: dataStore.logicalDate()))
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(presentation.dateSubtitle(for: state.selectedDate))
+                        .font(.system(size: 11))
+                        .foregroundStyle(chromeQuiet)
+                }
             }
             .frame(minWidth: 140)
             
@@ -466,8 +797,16 @@ struct JournalWindowView: View {
             Image(systemName: "lock.fill")
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
-            Text("This day is encrypted")
-                .font(.system(size: 16, weight: .semibold))
+            let lockedTitle = dataStore.journalTitle(for: state.selectedDate)
+            if !lockedTitle.isEmpty {
+                Text(lockedTitle)
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            Text(lockedTitle.isEmpty ? "This day is encrypted" : "This day's writing is encrypted")
+                .font(.system(size: lockedTitle.isEmpty ? 16 : 13, weight: lockedTitle.isEmpty ? .semibold : .regular))
+                .foregroundStyle(lockedTitle.isEmpty ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             Button("Unlock") {
                 requestUnlock(fresh: false, then: nil)
             }
@@ -850,6 +1189,222 @@ private struct JournalDayKeyboardShortcuts: View {
         if let monitor {
             NSEvent.removeMonitor(monitor)
             self.monitor = nil
+        }
+    }
+}
+
+// MARK: - Sidebar fields
+
+/// The system search field. `.searchable` needs a window toolbar, which the journal window does not have.
+private struct SidebarSearchField: NSViewRepresentable {
+    @Binding var text: String
+    var prompt: String
+    
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.controlSize = .regular
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.search(_:))
+        field.delegate = context.coordinator
+        return field
+    }
+    
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text {
+            field.stringValue = text
+        }
+    }
+    
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        
+        @objc func search(_ sender: NSSearchField) {
+            text.wrappedValue = sender.stringValue
+        }
+        
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            text.wrappedValue = field.stringValue
+        }
+        
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.cancelOperation(_:)), !control.stringValue.isEmpty else { return false }
+            control.stringValue = ""
+            text.wrappedValue = ""
+            return true
+        }
+    }
+}
+
+/// Left click opens the day. The second click of a double-click renames it.
+/// A SwiftUI button only reports one click, so the click count has to be read from the event.
+private struct SidebarRowClicker: NSViewRepresentable {
+    var canRename: Bool
+    var canRemoveTitle: Bool
+    var onSingle: () -> Void
+    var onDouble: () -> Void
+    var onRemoveTitle: () -> Void
+    
+    func makeNSView(context: Context) -> Clicker { Clicker() }
+    
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: Clicker, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 220, height: proposal.height ?? 44)
+    }
+    
+    func updateNSView(_ view: Clicker, context: Context) {
+        view.canRename = canRename
+        view.canRemoveTitle = canRemoveTitle
+        view.onSingle = onSingle
+        view.onDouble = onDouble
+        view.onRemoveTitle = onRemoveTitle
+    }
+    
+    final class Clicker: NSView {
+        var canRename = true
+        var canRemoveTitle = false
+        var onSingle: () -> Void = {}
+        var onDouble: () -> Void = {}
+        var onRemoveTitle: () -> Void = {}
+        
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            bounds.contains(point) ? self : nil
+        }
+        
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount >= 2, canRename {
+                onDouble()
+            } else {
+                onSingle()
+            }
+        }
+        
+        override func rightMouseDown(with event: NSEvent) {
+            let menu = NSMenu()
+            let rename = menu.addItem(withTitle: "Rename…", action: #selector(rename(_:)), keyEquivalent: "")
+            rename.target = self
+            rename.isEnabled = canRename
+            if canRemoveTitle {
+                let remove = menu.addItem(withTitle: "Remove Title", action: #selector(removeTitle(_:)), keyEquivalent: "")
+                remove.target = self
+            }
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
+        
+        @objc private func rename(_ sender: Any?) { onDouble() }
+        @objc private func removeTitle(_ sender: Any?) { onRemoveTitle() }
+    }
+}
+
+/// Inline rename in the Finder manner: the name is selected on entry, Return keeps it, Escape restores it,
+/// and clicking elsewhere keeps the edit. Keystrokes stay in the field so the list does not rebuild mid-edit.
+private struct SidebarRenameField: NSViewRepresentable {
+    var text: String
+    var placeholder: String
+    var onCommit: (String) -> Void
+    var onCancel: () -> Void
+    
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    
+    func makeNSView(context: Context) -> RenameTextField {
+        let field = RenameTextField(string: text)
+        field.placeholderString = placeholder
+        field.font = .systemFont(ofSize: 13, weight: .semibold)
+        field.isBordered = false
+        field.isBezeled = false
+        field.drawsBackground = true
+        field.backgroundColor = .textBackgroundColor
+        field.focusRingType = .exterior
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.delegate = context.coordinator
+        context.coordinator.field = field
+        return field
+    }
+    
+    func updateNSView(_ field: RenameTextField, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.field = field
+        if field.currentEditor() == nil, field.stringValue != text {
+            field.stringValue = text
+        }
+    }
+    
+    final class RenameTextField: NSTextField {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            focus(attempts: 8)
+        }
+        
+        private func focus(attempts: Int) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard let window = self.window else {
+                    if attempts > 1 { self.focus(attempts: attempts - 1) }
+                    return
+                }
+                let editor = window.firstResponder
+                if editor === self.currentEditor() || editor === self {
+                    self.currentEditor()?.selectAll(nil)
+                    return
+                }
+                if window.makeFirstResponder(self) {
+                    self.currentEditor()?.selectAll(nil)
+                } else if attempts > 1 {
+                    self.focus(attempts: attempts - 1)
+                }
+            }
+        }
+    }
+    
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: SidebarRenameField
+        weak var field: NSTextField?
+        private var finished = false
+        private var beganEditing = false
+        
+        init(_ parent: SidebarRenameField) { self.parent = parent }
+        
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            beganEditing = true
+        }
+        
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.insertNewline(_:)):
+                finish(commit: true, value: control.stringValue)
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                finish(commit: false, value: control.stringValue)
+                return true
+            default:
+                return false
+            }
+        }
+        
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard beganEditing, let field else { return }
+            finish(commit: true, value: field.stringValue)
+        }
+        
+        private func finish(commit: Bool, value: String) {
+            guard !finished else { return }
+            finished = true
+            let parent = parent
+            DispatchQueue.main.async {
+                commit ? parent.onCommit(value) : parent.onCancel()
+            }
         }
     }
 }
