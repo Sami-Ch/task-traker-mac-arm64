@@ -25,9 +25,18 @@ struct KeyChord: Codable, Equatable, Hashable {
     )
     static let journalPreviousDayDefault = KeyChord(
         keyCode: UInt16(kVK_LeftArrow),
-        carbonModifiers: UInt32(cmdKey)
+        carbonModifiers: UInt32(cmdKey | optionKey)
     )
     static let journalNextDayDefault = KeyChord(
+        keyCode: UInt16(kVK_RightArrow),
+        carbonModifiers: UInt32(cmdKey | optionKey)
+    )
+    /// Previous default. ⌘← / ⌘→ belong to the text caret, so saved copies of that pair move forward.
+    fileprivate static let retiredJournalPreviousDay = KeyChord(
+        keyCode: UInt16(kVK_LeftArrow),
+        carbonModifiers: UInt32(cmdKey)
+    )
+    fileprivate static let retiredJournalNextDay = KeyChord(
         keyCode: UInt16(kVK_RightArrow),
         carbonModifiers: UInt32(cmdKey)
     )
@@ -241,8 +250,14 @@ struct AppKeyboardShortcuts: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         openTasks = try c.decodeIfPresent(KeyChord.self, forKey: .openTasks) ?? .openTasksDefault
         openJournal = try c.decodeIfPresent(KeyChord.self, forKey: .openJournal) ?? .openJournalDefault
-        journalPreviousDay = try c.decodeIfPresent(KeyChord.self, forKey: .journalPreviousDay) ?? .journalPreviousDayDefault
-        journalNextDay = try c.decodeIfPresent(KeyChord.self, forKey: .journalNextDay) ?? .journalNextDayDefault
+        let storedPrevious = try c.decodeIfPresent(KeyChord.self, forKey: .journalPreviousDay)
+        let storedNext = try c.decodeIfPresent(KeyChord.self, forKey: .journalNextDay)
+        journalPreviousDay = storedPrevious == KeyChord.retiredJournalPreviousDay || storedPrevious == nil
+            ? .journalPreviousDayDefault
+            : storedPrevious!
+        journalNextDay = storedNext == KeyChord.retiredJournalNextDay || storedNext == nil
+            ? .journalNextDayDefault
+            : storedNext!
         insertJournalTasks = try c.decodeIfPresent(KeyChord.self, forKey: .insertJournalTasks) ?? .insertJournalTasksDefault
     }
     

@@ -132,7 +132,10 @@ enum JournalPageColors {
     static func paper(for choice: JournalPaper, custom: JournalRGB?, scheme: ColorScheme) -> NSColor {
         switch choice {
         case .automatic:
-            return scheme == .dark ? .textBackgroundColor : warm
+            // Concrete colors. Dynamic system colors were resolving the page as white and the letters as white.
+            return scheme == .dark
+                ? NSColor(srgbRed: 0.118, green: 0.118, blue: 0.118, alpha: 1)
+                : warm
         case .white:
             return .white
         case .warm:
@@ -148,7 +151,7 @@ enum JournalPageColors {
     
     static func ink(for paper: NSColor, choice: JournalPaper, scheme: ColorScheme) -> NSColor {
         if choice == .automatic {
-            return scheme == .dark ? .textColor : lightInk
+            return scheme == .dark ? darkInk : lightInk
         }
         return isLight(paper) ? lightInk : darkInk
     }
@@ -920,7 +923,9 @@ final class RichTextEditingSession {
         }
         
         storage.setAttributedString(content)
-        recolorAutomaticBody(in: storage, ink: pageInk)
+        if let view = textView as? JournalRichTextView {
+            repairUnreadableInk(in: storage, paper: view.pageBackground, ink: pageInk)
+        }
         var typing = JournalRichText.defaultAttributes()
         typing[.foregroundColor] = pageInk
         textView.typingAttributes = typing
@@ -1153,6 +1158,10 @@ final class RichTextEditingSession {
             textView.enclosingScrollView?.backgroundColor = paper
         }
         
+        if let storage = textView.textStorage {
+            repairUnreadableInk(in: storage, paper: paper, ink: ink)
+        }
+        
         var typing = textView.typingAttributes
         if let current = typing[.foregroundColor] as? NSColor {
             if JournalPageColors.isAutomaticBody(current, ink: ink) {
@@ -1162,21 +1171,26 @@ final class RichTextEditingSession {
             typing[.foregroundColor] = ink
         }
         textView.typingAttributes = typing
-        
-        if let storage = textView.textStorage, storage.length > 0 {
-            recolorAutomaticBody(in: storage, ink: ink)
-        }
         updateSelectionState()
     }
     
-    private func recolorAutomaticBody(in storage: NSTextStorage, ink: NSColor) {
+    /// Only gray letters that cannot be seen on this page. A previous pass stored white text on a white page.
+    private func repairUnreadableInk(in storage: NSTextStorage, paper: NSColor, ink: NSColor) {
+        guard storage.length > 0 else { return }
+        let paperIsLight = JournalPageColors.isLight(paper)
         isAdjustingPageColors = true
         textView?.undoManager?.disableUndoRegistration()
         storage.beginEditing()
         storage.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: storage.length)) { value, subRange, _ in
-            guard let color = value as? NSColor else { return }
-            guard JournalPageColors.isAutomaticBody(color, ink: ink) else { return }
-            if color.isClose(to: ink, tolerance: 0.02) { return }
+            guard let color = value as? NSColor, let rgb = color.usingColorSpace(.sRGB) else { return }
+            let red = rgb.redComponent
+            let green = rgb.greenComponent
+            let blue = rgb.blueComponent
+            let saturation = max(red, green, blue) - min(red, green, blue)
+            guard saturation < 0.12 else { return }
+            let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+            let hidden = paperIsLight ? luminance > 0.82 : luminance < 0.18
+            guard hidden, !color.isClose(to: ink, tolerance: 0.02) else { return }
             storage.addAttribute(.foregroundColor, value: ink, range: subRange)
         }
         storage.endEditing()
@@ -1229,6 +1243,53 @@ final class RichTextEditingSession {
     private var typingColor: Color {
         guard let color = textView?.typingAttributes[.foregroundColor] as? NSColor else { return .primary }
         return Color(nsColor: color)
+    }
+    
+    /// The word at the caret, or the current selection, plus dictionary guesses.
+    func spellingTarget() -> (word: String, range: NSRange, guesses: [String])? {
+        guard let textView else { return nil }
+        let editor = textView as? JournalRichTextView
+        let ns = textView.string as NSString
+        guard ns.length > 0 else { return nil }
+        let selected = textView.selectedRange()
+        let range: NSRange
+        if selected.length > 0 {
+            range = selected
+        } else if let word = editor?.wordRange(at: selected.location) {
+            range = word
+        } else {
+            return nil
+        }
+        guard range.length > 0, NSMaxRange(range) <= ns.length else { return nil }
+        let word = ns.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !word.isEmpty else { return nil }
+        let language = NSSpellChecker.shared.language()
+        let guesses = NSSpellChecker.shared.guesses(
+            forWordRange: range,
+            in: textView.string,
+            language: language.isEmpty ? nil : language,
+            inSpellDocumentWithTag: textView.spellCheckerDocumentTag
+        ) ?? []
+        return (word, range, Array(guesses.prefix(8)))
+    }
+    
+    func replaceSpelling(with replacement: String) {
+        guard let textView else { return }
+        let editor = textView as? JournalRichTextView
+        let ranges = textView.selectedRanges.map(\.rangeValue).filter { $0.length > 0 }
+        if ranges.count > 1 {
+            editor?.replaceOccurrences(ranges, with: replacement)
+            return
+        }
+        guard let target = spellingTarget() else { return }
+        textView.setSelectedRange(target.range)
+        textView.insertText(replacement, replacementRange: target.range)
+    }
+    
+    func checkSpellingInDocument() {
+        guard let textView else { return }
+        (textView as? JournalRichTextView)?.startSpellChecking()
+        textView.checkTextInDocument(nil)
     }
     
     func setHighlight(_ highlight: HighlightColor) {
@@ -1890,9 +1951,31 @@ struct RichTextToolbar: View {
                 
                 Divider().frame(height: 20)
                 
-                toolButton("textformat.abc", help: "Spelling") {
-                    session.textView?.showGuessPanel(nil)
+                Menu {
+                    if let target = session.spellingTarget() {
+                        Text("“\(target.word)”")
+                        if target.guesses.isEmpty {
+                            Button("No suggestions") {}
+                                .disabled(true)
+                        } else {
+                            ForEach(target.guesses, id: \.self) { guess in
+                                Button("Replace with \(guess)") {
+                                    session.replaceSpelling(with: guess)
+                                }
+                            }
+                        }
+                        Divider()
+                    }
+                    Button("Check Document Now") { session.checkSpellingInDocument() }
+                    Button("Spelling Panel…") { session.textView?.showGuessPanel(nil) }
+                } label: {
+                    Image(systemName: "textformat.abc")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .frame(width: 28, height: 26)
                 }
+                .buttonStyle(.plain)
+                .help("Spelling. Right-click a word to replace it. ⌘D selects the next match.")
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
                 .background(chipFill, in: RoundedRectangle(cornerRadius: 6))
@@ -1978,6 +2061,8 @@ struct RichTextEditor: NSViewRepresentable {
         scroll.drawsBackground = true
         scroll.backgroundColor = paper
         scroll.borderType = .noBorder
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 28, right: 0)
         // TextKit 2 draws NSTextList markers and continues them on Return.
         // The TextKit 1 initializer leaves the markers out of the layout.
         let textView = JournalRichTextView(usingTextLayoutManager: true)
@@ -2001,11 +2086,11 @@ struct RichTextEditor: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
-        textView.textContainerInset = NSSize(width: 48, height: 36)
+        textView.textContainerInset = NSSize(width: 0, height: 48)
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = false
+        textView.textContainer?.containerSize = NSSize(width: JournalRichTextView.writingColumn, height: CGFloat.greatestFiniteMagnitude)
         textView.defaultParagraphStyle = JournalParagraphStyle.normal.paragraphStyle()
         textView.typingAttributes = JournalRichText.defaultAttributes()
         textView.textStorage?.setAttributedString(JournalRichText.defaultAttributedString())
@@ -2084,7 +2169,10 @@ private final class JournalRichTextView: NSTextView {
     weak var session: RichTextEditingSession?
     var pageBackground: NSColor = JournalPageColors.warm
     var pageInk: NSColor = JournalPageColors.lightInk
-    private var appliedInset: CGFloat = -1
+    static let writingColumn: CGFloat = 680
+    private static let pagePadding: CGFloat = 48
+    private var appliedColumnWidth: CGFloat = writingColumn
+    private var appliedOriginX: CGFloat = -1
     private var viewportObservers: [NSObjectProtocol] = []
     
     /// SwiftUI turns layers on after updates. A layer-backed text view stops flashing the caret.
@@ -2106,10 +2194,6 @@ private final class JournalRichTextView: NSTextView {
         isAutomaticSpellingCorrectionEnabled = false
         enabledTextCheckingTypes = NSTextCheckingResult.CheckingType.spelling.rawValue
             | NSTextCheckingResult.CheckingType.grammar.rawValue
-        guard let storage = textStorage, storage.length > 0, window != nil else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.checkTextInDocument(nil)
-        }
     }
     
     func applyPageColors() {
@@ -2122,47 +2206,49 @@ private final class JournalRichTextView: NSTextView {
         enclosingScrollView?.contentView.backgroundColor = pageBackground
     }
     
-    /// Keep a 680pt writing column centered in the window.
-    func centerWritingColumn() {
-        guard let viewport = enclosingScrollView?.contentSize.width, viewport > 1 else { return }
-        let side = max(48, floor((viewport - 680) / 2))
-        guard abs(side - appliedInset) > 0.5 else { return }
-        appliedInset = side
-        textContainerInset = NSSize(width: side, height: 36)
-        textContainer?.widthTracksTextView = true
+    /// Side margins are the container's position, not its insets.
+    /// Changing `textContainerInset` on resize made TextKit treat the line width as new and rebuild the day.
+    override var textContainerOrigin: NSPoint {
+        let viewport = viewportWidth()
+        let column = appliedColumnWidth > 0 ? appliedColumnWidth : Self.writingColumn
+        let x = max(Self.pagePadding, floor((viewport - column) / 2))
+        return NSPoint(x: x, y: textContainerInset.height)
+    }
+    
+    private func viewportWidth() -> CGFloat {
+        if let width = enclosingScrollView?.contentSize.width, width > 1 { return width }
+        return bounds.width
+    }
+    
+    /// Updates the line width only when the window is too narrow for the 680pt column.
+    /// A wider window only slides the column. That does not rebuild the text.
+    func updateColumnWidthIfNeeded() {
+        guard let container = textContainer else { return }
+        let viewport = viewportWidth()
+        guard viewport > 1 else { return }
+        container.widthTracksTextView = false
+        let column = min(Self.writingColumn, max(120, viewport - Self.pagePadding * 2))
+        let originX = max(Self.pagePadding, floor((viewport - column) / 2))
+        let widthChanged = abs(column - appliedColumnWidth) > 0.5
+        let originChanged = abs(originX - appliedOriginX) > 0.5
+        guard widthChanged || originChanged else { return }
+        appliedOriginX = originX
+        if widthChanged {
+            appliedColumnWidth = column
+            container.containerSize = NSSize(width: column, height: CGFloat.greatestFiniteMagnitude)
+        }
+        invalidateTextContainerOrigin()
         needsDisplay = true
     }
     
-    /// Full screen and live resize finish with a stale line layout unless this runs.
-    /// Stay on `textLayoutManager`. Reading `layoutManager` switches the view back to TextKit 1.
-    func relayoutForViewportChange() {
-        centerWritingColumn()
-        if let layoutManager = textLayoutManager {
-            layoutManager.ensureLayout(for: layoutManager.documentRange)
-        }
-        needsDisplay = true
-        if window?.firstResponder === self {
-            updateInsertionPointStateAndRestartTimer(true)
-        }
-    }
-    
-    override func layout() {
-        super.layout()
-        if window?.inLiveResize == true { return }
-        centerWritingColumn()
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateColumnWidthIfNeeded()
     }
     
     override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
-        relayoutAfterViewportSettles()
-    }
-    
-    /// The final bounds are sometimes one turn behind the notification.
-    private func relayoutAfterViewportSettles() {
-        relayoutForViewportChange()
-        DispatchQueue.main.async { [weak self] in
-            self?.relayoutForViewportChange()
-        }
+        updateColumnWidthIfNeeded()
     }
     
     override func viewDidMoveToWindow() {
@@ -2174,10 +2260,10 @@ private final class JournalRichTextView: NSTextView {
         let center = NotificationCenter.default
         viewportObservers = [
             center.addObserver(forName: NSWindow.didEnterFullScreenNotification, object: window, queue: .main) { [weak self] _ in
-                self?.relayoutAfterViewportSettles()
+                self?.updateColumnWidthIfNeeded()
             },
             center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
-                self?.relayoutAfterViewportSettles()
+                self?.updateColumnWidthIfNeeded()
             }
         ]
         DispatchQueue.main.async { [weak self] in
@@ -2192,6 +2278,125 @@ private final class JournalRichTextView: NSTextView {
             NotificationCenter.default.removeObserver(token)
         }
         viewportObservers.removeAll()
+    }
+    
+    /// ⌘D, like Visual Studio Code: the first press selects the word; the next presses add the following copies.
+    func addNextOccurrence() {
+        let ns = string as NSString
+        guard ns.length > 0 else { return }
+        var ranges = selectedRanges.map(\.rangeValue).sorted { $0.location < $1.location }
+        if ranges.allSatisfy({ $0.length == 0 }) {
+            let caret = ranges.first?.location ?? selectedRange().location
+            guard let word = wordRange(at: caret) else { return }
+            setSelectedRange(word)
+            scrollRangeToVisible(word)
+            return
+        }
+        guard let needleRange = ranges.last(where: { $0.length > 0 }) else { return }
+        let needle = ns.substring(with: needleRange)
+        guard !needle.isEmpty else { return }
+        var searchFrom = NSMaxRange(ranges.last ?? needleRange)
+        var found = NSRange(location: NSNotFound, length: 0)
+        if searchFrom < ns.length {
+            found = ns.range(of: needle, range: NSRange(location: searchFrom, length: ns.length - searchFrom))
+        }
+        if found.location == NSNotFound {
+            found = ns.range(of: needle, range: NSRange(location: 0, length: ns.length))
+        }
+        guard found.location != NSNotFound else { return }
+        if ranges.contains(where: { NSIntersectionRange($0, found).length == found.length && $0.location == found.location }) {
+            return
+        }
+        ranges.append(found)
+        ranges.sort { $0.location < $1.location }
+        setSelectedRanges(ranges.map { NSValue(range: $0) }, affinity: .downstream, stillSelecting: false)
+        scrollRangeToVisible(found)
+    }
+    
+    func wordRange(at location: Int) -> NSRange? {
+        let ns = string as NSString
+        guard ns.length > 0 else { return nil }
+        let index = min(max(0, location >= ns.length ? ns.length - 1 : location), ns.length - 1)
+        let proposed = selectionRange(
+            forProposedRange: NSRange(location: index, length: 0),
+            granularity: .selectByWord
+        )
+        guard proposed.length > 0, NSMaxRange(proposed) <= ns.length else { return nil }
+        let raw = ns.substring(with: proposed)
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let start = (raw as NSString).range(of: trimmed).location
+        guard start != NSNotFound else { return nil }
+        return NSRange(location: proposed.location + start, length: (trimmed as NSString).length)
+    }
+    
+    func replaceOccurrences(_ ranges: [NSRange], with text: String) {
+        guard let storage = textStorage else { return }
+        let edits = Self.nonOverlapping(ranges)
+        guard !edits.isEmpty else { return }
+        let inserted = (text as NSString).length
+        undoManager?.beginUndoGrouping()
+        var delta = 0
+        var carets: [NSValue] = []
+        for range in edits {
+            let adjusted = NSRange(location: range.location + delta, length: range.length)
+            guard shouldChangeText(in: adjusted, replacementString: text) else { continue }
+            storage.replaceCharacters(in: adjusted, with: text)
+            didChangeText()
+            carets.append(NSValue(range: NSRange(location: adjusted.location + inserted, length: 0)))
+            delta += inserted - range.length
+        }
+        undoManager?.endUndoGrouping()
+        if !carets.isEmpty {
+            setSelectedRanges(carets, affinity: .downstream, stillSelecting: false)
+        }
+    }
+    
+    private static func nonOverlapping(_ ranges: [NSRange]) -> [NSRange] {
+        let sorted = ranges.filter { $0.location != NSNotFound && $0.location >= 0 }.sorted { $0.location < $1.location }
+        var kept: [NSRange] = []
+        for range in sorted {
+            if let last = kept.last, range.location < NSMaxRange(last) { continue }
+            kept.append(range)
+        }
+        return kept
+    }
+    
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        let ranges = selectedRanges.map(\.rangeValue).filter { $0.length > 0 }
+        guard !hasMarkedText(), ranges.count > 1 else {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+        let text: String
+        if let string = insertString as? String {
+            text = string
+        } else if let attributed = insertString as? NSAttributedString {
+            text = attributed.string
+        } else {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+        replaceOccurrences(ranges, with: text)
+    }
+    
+    override func deleteBackward(_ sender: Any?) {
+        let ranges = selectedRanges.map(\.rangeValue)
+        guard ranges.count > 1 else {
+            super.deleteBackward(sender)
+            return
+        }
+        let ns = string as NSString
+        var edits: [NSRange] = []
+        for range in ranges {
+            if range.length > 0 {
+                edits.append(range)
+            } else if range.location > 0 {
+                let start = range.location - 1
+                edits.append(NSRange(location: start, length: min(1, ns.length - start)))
+            }
+        }
+        replaceOccurrences(edits, with: "")
     }
     
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -2217,6 +2422,8 @@ private final class JournalRichTextView: NSTextView {
             action = { [weak self] in self?.session?.toggleUnderline() }
         case kVK_ANSI_K where flags == .command:
             action = { [weak self] in self?.session?.insertLink() }
+        case kVK_ANSI_D where flags == .command:
+            action = { [weak self] in self?.addNextOccurrence() }
         case kVK_ANSI_Semicolon where flags == .command:
             action = { [weak self] in self?.session?.insertDateTimestamp() }
         case kVK_ANSI_X where flags == [.command, .shift]:

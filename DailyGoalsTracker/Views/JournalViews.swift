@@ -554,7 +554,8 @@ struct JournalWindowView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     hintRow("⌘B Bold", "⌘I Italic", "⌘U Underline")
                     hintRow("⌘⌥1 Heading", "⌘⇧8 Bullets", "⌘K Link")
-                    hintRow("⌘; Insert date", "⌘⇧F Focus mode", "")
+                    hintRow("⌘; Insert date", "⌘D Next match", "⌘⇧F Focus")
+                    hintRow("⌘⌥← Previous day", "⌘⌥→ Next day", "")
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(pageQuiet)
@@ -811,7 +812,7 @@ enum JournalExporter {
     }
 }
 
-/// Local monitor so journal day shortcuts work when the editor is not first responder.
+/// Local monitor so ⌘⌥← / ⌘⌥→ change the journal day even while the caret is in the text.
 private struct JournalDayKeyboardShortcuts: View {
     let previous: KeyChord
     let next: KeyChord
@@ -833,8 +834,6 @@ private struct JournalDayKeyboardShortcuts: View {
         remove()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard NSApp.keyWindow?.title == "Journal" else { return event }
-            // ⌘← and ⌘→ move the caret while typing. Day shortcuts apply only when a text view is not focused.
-            if NSApp.keyWindow?.firstResponder is NSTextView { return event }
             if previous.matches(event) {
                 onPrevious()
                 return nil
